@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <StartupObject>Program</StartupObject>
+		<BaseOutputPath>..\..\Binaries</BaseOutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Diagnostics.EventLog" Version="9.0.7" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SharedLoggerLib\SharedLoggerLib.csproj" />
+  </ItemGroup>
+</Project>
