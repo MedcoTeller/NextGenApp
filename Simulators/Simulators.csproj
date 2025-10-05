@@ -9,4 +9,8 @@
 		<BaseOutputPath>..\Binaries</BaseOutputPath>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\GlobalShared\GlobalShared.csproj" />
+  </ItemGroup>
+
 </Project>

@@ -1,85 +1,126 @@
 ﻿using System;
-using System.Text.Json;
+using System.Net.WebSockets;
 using System.Threading.Tasks;
+using GlobalShared;
+using Simulators.Xfs4IoT.Network;
 
 namespace Simulators.Xfs4IoT
 {
     /// <summary>
-    /// Base class for all device simulators. Handles generic XFS4IoT message dispatching.
+    /// Generic base class for device simulators.
+    /// - Owns a CommandDispatcher
+    /// - Hosts a WebSocketHost that accepts connections on a port
+    /// - For each connection creates an IMessageSink wrapper and wires incoming messages into Dispatcher
     /// </summary>
     public abstract class BaseSimulator
     {
-        private readonly CommandDispatcher _dispatcher = new CommandDispatcher();
+        protected readonly Utils Logger;
+        protected readonly CommandDispatcher Dispatcher;
+        private readonly WebSocketHost _host;
+        private readonly int _port;
 
         /// <summary>
-        /// Registers a command handler for this simulator.
+        /// Construct base simulator.
         /// </summary>
-        protected void RegisterCommand(string commandName, CommandHandler handler)
+        /// <param name="deviceName">Name used in logger</param>
+        /// <param name="port">Port to listen on for WebSocket clients</param>
+        protected BaseSimulator(string deviceName, int port)
         {
-            _dispatcher.Register(commandName, handler);
+            Logger = new Utils(deviceName);
+            Dispatcher = new CommandDispatcher();
+            _port = port;
+
+            // Provide a callback to handle new connections
+            _host = new WebSocketHost(port, OnNewConnectionAsync);
+
+            Logger.LogInfo($"{deviceName} simulator created on port {port}");
         }
 
         /// <summary>
-        /// Processes an incoming raw JSON message from a client.
+        /// Start the simulator's WebSocket host (non-blocking).
         /// </summary>
-        public async Task ProcessMessageAsync(string json, IMessageSink sink)
+        public Task StartAsync()
         {
-            Xfs4Message? msg;
-            try
-            {
-                msg = JsonSerializer.Deserialize<Xfs4Message>(json);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[Simulator] Failed to parse incoming JSON: {ex.Message}");
-                return;
-            }
-
-            if (msg == null)
-                return;
-
-            await _dispatcher.DispatchAsync(msg, sink);
+            Logger.LogInfo("Starting simulator host...");
+            return _host.StartAsync();
         }
 
         /// <summary>
-        /// Helper to send a completion message for a request.
+        /// Stop the simulator host.
         /// </summary>
-        protected async Task SendCompletionAsync(IMessageSink sink, Xfs4Message request, string completionCode, object? payload = null)
+        public Task StopAsync()
         {
-            var completion = new Xfs4Message
+            Logger.LogInfo("Stopping simulator host...");
+            return _host.StopAsync();
+        }
+
+        /// <summary>
+        /// Called by WebSocketHost when a new connection arrives.
+        /// Wires message receive events to parse incoming JSON and dispatch commands.
+        /// </summary>
+        private async Task OnNewConnectionAsync(BaseWebSocketConnection connection)
+        {
+            Logger.LogInfo("New client connection established.");
+
+            // Create a sink that wraps this connection so handlers can send messages easily
+            var sink = new ConnectionMessageSink(connection, Logger);
+
+            // When connection provides text messages, parse and forward to dispatcher
+            connection.TextMessageReceived += async (json) =>
             {
-                Header = new Xfs4Header
+                try
                 {
-                    RequestId = request.Header.RequestId,
-                    Type = MessageType.Completion,
-                    Name = request.Header.Name,
-                    Status = completionCode
-                },
-                Payload = (JsonElement?)payload
+                    var msg = new Xfs4Message(json);
+                    Logger.LogDebug($"Incoming {msg.Header.Type} : {msg.Header.Name} (requestId={msg.Header.RequestId})");
+
+                    if (msg.Header.Type == MessageType.Command)
+                    {
+                        // Dispatch the command to registered handler(s)
+                        await Dispatcher.DispatchAsync(msg, sink);
+                    }
+                    else
+                    {
+                        // For now ignore unsolicited completions/acks from client
+                        Logger.LogDebug("Ignoring non-command message from client");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"Failed to parse/process incoming message: {ex.Message}");
+                    // Optionally send back an error completion if appropriate
+                }
             };
 
-            //string json = JsonSerializer.Serialize(completion);
-            await sink.SendMessageAsync(completion);
+            connection.Disconnected += () =>
+            {
+                Logger.LogInfo("Client disconnected.");
+            };
+
+            // Note: receive loop already started by WebSocketHost before calling this callback.
+            await Task.CompletedTask;
         }
 
         /// <summary>
-        /// Helper to send an event related to a request.
+        /// Small adapter implementing IMessageSink by sending Xfs4Message JSON via BaseWebSocketConnection.
+        /// This allows dispatcher handlers to send messages without dealing with sockets directly.
         /// </summary>
-        protected async Task SendEventAsync(IMessageSink sink, Xfs4Message request, object? payload = null)
+        private class ConnectionMessageSink : IMessageSink
         {
-            var ev = new Xfs4Message
-            {
-                Header = new Xfs4Header
-                {
-                    RequestId = request.Header.RequestId,
-                    Type = MessageType.Event,
-                    Name = request.Header.Name + ".Event" // convention: extend with .Event
-                },
-                Payload = (JsonElement?)payload
-            };
+            private readonly BaseWebSocketConnection _connection;
+            private readonly Utils _logger;
 
-            //string json = JsonSerializer.Serialize(ev);
-            await sink.SendMessageAsync(ev);
+            public ConnectionMessageSink(BaseWebSocketConnection connection, Utils logger)
+            {
+                _connection = connection;
+                _logger = logger;
+            }
+
+            public async Task SendAsync(Xfs4Message message)
+            {
+                var json = message.ToJson();
+                await _connection.SendAsync(json);
+                _logger.LogDebug($"Sent message via sink: {message.Header.Type} {message.Header.Name} requestId={message.Header.RequestId}");
+            }
         }
     }
 }
