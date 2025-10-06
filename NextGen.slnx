@@ -7,11 +7,12 @@
     <Project Path="C:/Users/h_moh/source/repos/NextGen/Logger/SharedLoggerLib/SharedLoggerLib.csproj" />
   </Folder>
 
-  <Project Path="C:/Users/h_moh/source/repos/NextGen/Devices/Devices.csproj"  />
+  <Project Path="C:/Users/h_moh/source/repos/NextGen/Devices/Devices.csproj" />
   <Project Path="C:/Users/h_moh/source/repos/NextGen/GlobalShared/GlobalShared.csproj" Id="49d387a4-c780-4b0c-b682-68307b209b1e" />
   <Project Path="C:/Users/h_moh/source/repos/NextGen/Hosts/Hosts.csproj" Id="3d7a4178-75ce-4f30-a5ad-c72876c1830a" />
   <Project Path="C:/Users/h_moh/source/repos/NextGen/OperatorApp/OperatorApp.csproj" Id="093a56c7-0862-41bc-8eec-ae37a2b412bb" />
   <Project Path="C:/Users/h_moh/source/repos/NextGen/TestApp/TestApp.csproj" />
   <Project Path="C:/Users/h_moh/source/repos/NextGen/UI/UI.csproj" Id="56a90132-5cbc-4daf-93a4-7de080bf495c" />
   <Project Path="C:/Users/h_moh/source/repos/NextGen/UserApp/UserApp.csproj" Id="4f4cfc69-5a63-4653-b8e3-b3854d25dea4" />
+  <Project Path="Simulators/Simulators.csproj" Id="19588532-49f3-42cf-817a-b17910e6327b" />
 </Solution>

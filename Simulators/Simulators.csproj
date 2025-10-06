@@ -1,15 +1,13 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
 		<BaseOutputPath>..\Binaries</BaseOutputPath>
   </PropertyGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Websocket.Client" Version="5.3.0" />
-  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\GlobalShared\GlobalShared.csproj" />
