@@ -1,112 +1,69 @@
-﻿using System.Threading.Tasks;
-using GlobalShared;
+﻿using Simulators.Xfs4IoT;
 
-namespace Simulators.Xfs4IoT.Devices
+namespace Simulators.Devices
 {
-    /// <summary>
-    /// Example CardReader simulator. Demonstrates:
-    /// - registering handlers
-    /// - sending events then final completion
-    /// </summary>
     public class CardReaderSimulator : BaseSimulator
     {
-        private bool _cardInserted;
-
-        public CardReaderSimulator(int port) : base("CardReader", port)
+        public CardReaderSimulator(string url, string deviceName = "Cardreader")
+            : base(url, deviceName)
         {
-            // Register the command handlers for card reader commands.
-            // Handlers use the CommandHandler signature: Task(Xfs4Message, IMessageSink)
-            Dispatcher.Register("CardReader.ReadRawData", HandleReadRawDataAsync);
-            Dispatcher.Register("CardReader.EjectCard", HandleEjectCardAsync);
-            Dispatcher.Register("CardReader.Reset", HandleResetAsync);
+            RegisterCommandHandler("CardReader.ReadCard", ReadCard);
+            RegisterCommandHandler("CardReader.Resetrd", Reset);
+            //more commands handling
         }
 
-        /// <summary>
-        /// Simulate reading raw data from the inserted card.
-        /// Emits a MediaInserted event if necessary then a completion with card data.
-        /// </summary>
-        private async Task HandleReadRawDataAsync(Xfs4Message command, IMessageSink sink)
+        public override void ClientConnected()
         {
-            Logger.LogInfo("HandleReadRawDataAsync invoked");
 
-            // If card not present, emit an event to indicate media inserted
-            if (!_cardInserted)
+        }
+
+        public override void MessageReceived(Xfs4Message req, System.Net.WebSockets.WebSocket socket)
+        {
+
+        }
+
+        private async Task ReadCard(System.Net.WebSockets.WebSocket socket, Xfs4Message req)
+        {
+            _logger.LogInfo("Simulating card read...");
+
+            await Task.Delay(1500); // simulate hardware delay
+
+            var completion = new Xfs4Message
             {
-                _cardInserted = true;
-                var ev = new Xfs4Message(MessageType.Event, "CardReader.MediaInserted", command.Header.RequestId, payload: new { info = "card inserted (simulated)" });
-                await sink.SendAsync(ev);
-            }
-
-            // Simulate a delay for reading
-            await Task.Delay(500);
-
-            // Optionally send progress events (example)
-            var progress = new Xfs4Message(MessageType.Event, "CardReader.ReadProgress", command.Header.RequestId, payload: new { percent = 50 });
-            await sink.SendAsync(progress);
-
-            await Task.Delay(500);
-
-            // Final completion with data
-            var payload = new
-            {
-                track1 = "B1234567890123456^DOE/JOHN^25121010000000000000",
-                track2 = "1234567890123456=25121010000000000000",
-                chipData = "9F2608AABBCCDDEEFF1122"
+                Header = new Xfs4Header
+                {
+                    Name = "CardReader.ReadCard",
+                    Type = MessageType.Completion,
+                    RequestId = req.Header.RequestId
+                },
+                Payload = new
+                {
+                    Status = "Success",
+                    CardData = "1234-5678-9012-3456"
+                }
             };
 
-            var completion = new Xfs4Message(MessageType.Completion, "CardReader.ReadRawData", command.Header.RequestId, payload: payload, status: "success");
-            await sink.SendAsync(completion);
-
-            Logger.LogInfo("HandleReadRawDataAsync completed");
+            await SendAsync(socket, completion, _cts.Token);
+            _logger.LogInfo("Card read completed.");
         }
 
-        /// <summary>
-        /// Simulate ejecting the card: present, then remove, then completion.
-        /// </summary>
-        private async Task HandleEjectCardAsync(Xfs4Message command, IMessageSink sink)
-        {
-            Logger.LogInfo("HandleEjectCardAsync invoked");
 
-            if (!_cardInserted)
+        private async Task Reset(System.Net.WebSockets.WebSocket socket, Xfs4Message req)
+        {
+            var response = new Xfs4Message
             {
-                // No media present -> immediate completion with code
-                var noMedia = new Xfs4Message(MessageType.Completion, "CardReader.EjectCard", command.Header.RequestId, payload: null, status: "noMediaPresent");
-                await sink.SendAsync(noMedia);
-                return;
-            }
-
-            // Media presented event
-            var presented = new Xfs4Message(MessageType.Event, "CardReader.MediaPresented", command.Header.RequestId, payload: new { message = "Card is being presented" });
-            await sink.SendAsync(presented);
-
-            // Simulate user taking card
-            await Task.Delay(800);
-
-            _cardInserted = false;
-
-            // Media removed event
-            var removed = new Xfs4Message(MessageType.Event, "CardReader.MediaRemoved", command.Header.RequestId, payload: new { message = "Card removed" });
-            await sink.SendAsync(removed);
-
-            // Final completion
-            var completion = new Xfs4Message(MessageType.Completion, "CardReader.EjectCard", command.Header.RequestId, payload: null, status: "success");
-            await sink.SendAsync(completion);
-
-            Logger.LogInfo("HandleEjectCardAsync completed");
-        }
-
-        /// <summary>
-        /// Reset the simulated device.
-        /// </summary>
-        private async Task HandleResetAsync(Xfs4Message command, IMessageSink sink)
-        {
-            Logger.LogInfo("HandleResetAsync invoked");
-            _cardInserted = false;
-            await Task.Delay(300);
-
-            var completion = new Xfs4Message(MessageType.Completion, "CardReader.Reset", command.Header.RequestId, payload: new { message = "reset done" }, status: "success");
-            await sink.SendAsync(completion);
-            Logger.LogInfo("HandleResetAsync completed");
+                Header = new Xfs4Header
+                {
+                    Name = "CardReader.Reset",
+                    Type = MessageType.Completion,
+                    RequestId = req.Header.RequestId
+                },
+                Payload = new
+                {
+                    Status = "Success"
+                }
+            };
+            await SendAsync(socket, response, _cts.Token);
         }
     }
 }
