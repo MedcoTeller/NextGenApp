@@ -9,17 +9,74 @@ using System.Threading.Channels;
 
 namespace Simulators
 {
-    public class BaseSimulator: IDisposable
+    /// <summary>
+    /// Provides a base implementation for a device simulator that manages HTTP and WebSocket connections, command
+    /// handling, and device state for XFS4IoT services.
+    /// </summary>
+    /// <remarks>BaseSimulator is designed to be extended for specific device types, allowing derived classes
+    /// to customize status and capability reporting by overriding relevant methods. It manages client connections,
+    /// message broadcasting, and command dispatching, and exposes events for client and message activity. The class is
+    /// not thread-safe for all operations; care should be taken when accessing shared state from derived classes.
+    /// Dispose the simulator to ensure all resources are released and background tasks are stopped.</remarks>
+    public class BaseSimulator : IDisposable
     {
         private readonly string _url;
         private HttpListener? _listener;
         private CancellationTokenSource? _workerCts;
-        private readonly ConcurrentDictionary<string, Func<WebSocket,Xfs4Message, Task>> _CommandHandlers = new();
+        private readonly ConcurrentDictionary<string, Func<WebSocket, Xfs4Message, Task>> _CommandHandlers = new();
         private readonly Channel<(Xfs4Message msg, WebSocket conn)> _queue;
         private Task? _workerTask;
 
         protected CancellationTokenSource? _cts;
         protected readonly Utils _logger;
+        protected readonly List<WebSocket> _allClients = new();
+
+        public string ServiceName { get; protected set; }
+        public int Port { get; protected set; }
+        public string HostName { get; protected set; }
+        public string DeviceName { get; protected set; }
+        public string Url => _url;
+
+        // Shared device state / properties
+        public bool IsOnline { get; protected set; } = false;
+        public DeviceStatusEnum? DeviceStatus { get; protected set; } = DeviceStatusEnum.noDevice;
+        public DevicePositionStatusEnum? DevicePositionStatus { get; private set; } = null;// DevicePositionStatusEnum.notInPosition;
+        public int PowerSaveRecoveryTime { get; private set; } = 10;
+        public AntiFraudModuleStatusEnum? AntiFraudModuleStatus { get; private set; } = null;// AntiFraudModuleStatusEnum.ok;
+        public ExchangeStatusEnum? ExchangeStatus { get; private set; } = null;// ExchangeStatusEnum.active;
+        public EndToEndSecurityStatusEnum? EndToEndSecurityStatus { get; private set; } = null;
+        public int RemainingCapacityStatus { get; private set; } = 0;
+        public DateTime LastHeartbeat { get; protected set; } = DateTime.MinValue;
+
+        // Capabilities: e.g. common capabilities
+        protected Dictionary<string, object> CommonCapabilities { get; } = new Dictionary<string, object>();
+        public string ServiceVersion { get; private set; } = "1.0.0";
+        public string ModelName { get; private set; }
+        public bool PowerSaveControlCp { get; private set; } = false;
+        public bool HasAntiFraudModuleCp { get; private set; } = false;
+        public RequiredEndToEndSecurityEnum? RequiredEndToEndSecurityCp { get; private set; } = RequiredEndToEndSecurityEnum.always;
+        public bool HardwareSecurityElementCp { get; private set; } = false;
+        public ResponseSecurityEnabledEnum? ResponseSecurityEnabledCp { get; private set; } = ResponseSecurityEnabledEnum.always;
+
+        /// <summary>
+        /// Gets or sets the timeout period, in seconds, for command nonces before they expire.
+        /// If this device supports end-to-end security and can return a command nonce with the 
+        /// command Common.GetCommandNonce, and the device automatically clears the command nonce 
+        /// after a fixed length of time, this property will report the number of seconds between returning the command nonce and clearing it.
+        /// The value is given in seconds but it should not be assumed that the timeout will be 
+        /// accurate to the nearest second.The nonce may also become invalid before the timeout, for example because of a power failure.
+        /// The device may impose a timeout to reduce the chance of an attacker re-using a nonce 
+        /// value or a token.This timeout will be long enough to support normal operations such as 
+        /// dispense and present including creating the required token on the host and passing it to 
+        /// the device.For example, a command nonce might time out after one hour (that is, 3600 seconds).
+        /// In all other cases, commandNonceTimeout will have a value of zero.Any command nonce will never 
+        /// timeout.It may still become invalid, for example because of a power failure or when explicitly 
+        /// cleared using the Common.ClearCommandNonce command.
+        /// </summary>
+        /// <remarks>A command nonce is used to prevent replay attacks or duplicate command execution.
+        /// Adjust this value to control how long a nonce remains valid after issuance. Setting a lower value increases
+        /// security but may require clients to complete operations more quickly.</remarks>
+        public int CommandNonceTimeout { get; set; } = 3600;
 
         /// <summary>
         /// Event triggered when a message is received from a client.
@@ -35,24 +92,6 @@ namespace Simulators
         /// Event triggered when a client disconnects.
         /// </summary>
         public event Action? OnClientDisconnected;
-        public string ServiceName { get; protected set; }
-        public int Port { get; protected set; }
-        public string HostName { get; protected set; }
-        public string DeviceName  { get; protected set; }
-        public string Url => _url;
-
-        /// <summary>
-        /// Constructs a new BaseSimulator with the specified URL and device name.
-        /// </summary>
-        /// <param name="url">The base URL for the simulator.</param>
-        /// <param name="deviceName">The name of the device being simulated.</param>
-        public BaseSimulator(string url, string deviceName)
-        {
-            _url = url;
-            _logger = new Utils($"{ServiceName}");
-            _queue = Channel.CreateUnbounded<(Xfs4Message msg, WebSocket conn)>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
-            DeviceName = deviceName;
-        }
 
         /// <summary>
         /// Constructs a new BaseSimulator with the specified URL, device name, and service name.
@@ -67,6 +106,11 @@ namespace Simulators
             _queue = Channel.CreateUnbounded<(Xfs4Message msg, WebSocket conn)>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
             DeviceName = deviceName;
             ServiceName = serviceName;
+            ModelName = $"NextGen{DeviceName}SimulatorModel";
+
+            // Register default handlers for common commands
+            RegisterCommandHandler("Common.Status", HandleCommonStatusAsync);
+            RegisterCommandHandler("Common.Capabilities", HandleCommonCapabilitiesAsync);
         }
 
         /// <summary>
@@ -84,10 +128,12 @@ namespace Simulators
                 _listener.Prefixes.Add(prefix);
                 _listener.Start();
                 _logger.LogInfo($"Listening on {prefix}");
-                ``
                 Task.Run(() => AcceptLoop(_cts.Token));
 
                 _workerTask = Task.Run(() => WorkerLoopAsync(_workerCts.Token));
+                IsOnline = true;
+                DeviceStatus = DeviceStatusEnum.online;
+                LastHeartbeat = DateTime.UtcNow;
             }
             catch (Exception ex)
             {
@@ -105,6 +151,9 @@ namespace Simulators
             _workerCts?.Cancel();
             _cts?.Cancel();
             if (_workerTask != null) await _workerTask;
+
+            IsOnline = false;
+            DeviceStatus = DeviceStatusEnum.noDevice;
         }
 
         /// <summary>
@@ -115,6 +164,25 @@ namespace Simulators
         public void RegisterCommandHandler(string command, Func<WebSocket, Xfs4Message, Task> handler)
         {
             _CommandHandlers[command] = handler;
+        }
+
+        /// <summary>
+        /// Sends the specified message to all connected clients whose WebSocket connection is open.
+        /// </summary>
+        /// <remarks>This method blocks until all messages have been sent. If a client is not connected or
+        /// its WebSocket state is not open, the message will not be sent to that client.</remarks>
+        /// <param name="message">The message to broadcast to all active clients. Cannot be null.</param>
+        public void BroadcastMessage(Xfs4Message message)
+        {
+            var tasks = new List<Task>();
+            foreach (var client in _allClients)
+            {
+                if (client.State == WebSocketState.Open)
+                {
+                    tasks.Add(SendAsync(client, message, CancellationToken.None));
+                }
+            }
+            Task.WhenAll(tasks).GetAwaiter().GetResult();
         }
 
         /// <summary>
@@ -134,6 +202,7 @@ namespace Simulators
                         var wsContext = await ctx.AcceptWebSocketAsync(null);
                         OnClientConnected?.Invoke();
                         ClientConnected();
+                        _allClients.Add(wsContext.WebSocket);
                         _ = HandleClient(wsContext.WebSocket, token);
                     }
                     else
@@ -267,6 +336,117 @@ namespace Simulators
             await socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, token);
         }
 
+        protected virtual object GetDeviceCommonStatusPart()
+        {
+            var common = new
+            {
+                device = DeviceStatus.ToString(),
+                devicePosition = DevicePositionStatus?.ToString(),
+                powerSaveRecoveryTime = PowerSaveRecoveryTime,
+                antiFraudModule = AntiFraudModuleStatus?.ToString(),
+                exchange = ExchangeStatus?.ToString(),
+                endToEndSecurity = EndToEndSecurityStatus?.ToString(), // Enum value as string, case-sensitive, null if not supported
+                persistentDataStore = new { remaining = RemainingCapacityStatus }
+            };
+            return common;
+        }
+
+        /// <summary>
+        /// Handler for Common.Status command — returns shared (common) status plus device-specific status.
+        /// Derived classes should override GetDeviceStatusPart to add their own part.
+        /// </summary>
+        protected virtual object GetDeviceStatusPart()
+        {
+            return null;
+        }
+
+        /// <summary>
+        /// Handler for Common.Capabilities command — returns shared capabilities + device-specific capabilities.
+        /// Derived classes should override GetDeviceCapabilitiesPart to add their own.
+        /// </summary>
+        protected virtual object GetDeviceCapabilitiesPart()
+        {
+            return null;
+        }
+
+        /// <summary>
+        /// Array of commands which require an E2E token to authorize. These commands will fail if called without a valid token.
+        ///The commands that can be listed here depend on the XFS4IoT standard, but it's possible that the standard will change 
+        ///over time, so for maximum compatibility an application should check this property before calling a command.
+        ///Note that this only includes commands that require a token.Commands that take a nonce and return a token will not be 
+        ///listed here.Those commands can be called without a nonce and will continue to operate in a compatible way.
+        /// </summary>
+        protected virtual IEnumerable<string> SupportedEndToEndSecurityCommands => Array.Empty<string>();
+
+        private async Task HandleCommonStatusAsync(WebSocket socket, Xfs4Message msg)
+        {
+            var common = GetDeviceCommonStatusPart();
+
+            var devicePart = GetDeviceStatusPart();
+
+            var payload = new Dictionary<string, object>
+            {
+                ["common"] = common
+            };
+            if (devicePart != null)
+                payload[DeviceName.ToLower()] = devicePart;
+
+            var resp = new Xfs4Message(MessageType.Completion, "Common.Status", msg.Header.RequestId, payload, status: "success");
+            await SendAsync(socket, resp, _cts!.Token);
+        }
+
+
+        private async Task HandleCommonCapabilitiesAsync(WebSocket socket, Xfs4Message msg)
+        {
+            var common = new
+            {
+                serviceVersion = ServiceVersion,
+                deviceInformation = new[] {
+                    new {
+                        modelName = ModelName,
+                        serialNumber = "1.0.10.25",
+                        revisionNumber = "1.0",
+                        modelDescription = "NextGen Simulator",
+                        firmware = new[] {
+                            new {
+                                firmwareName = "NextGen Simulator Firmware",
+                                firmwareVersion = "1.0.0",
+                                hardwareRevision = "1.0"
+                            }
+                        },
+                        software = new[] {
+                            new {
+                                softwareName = DeviceName + "SW",
+                                softwareVersion = "1.0.0"
+                            }
+                        }
+                    }
+                },
+                powerSaveControl = PowerSaveControlCp,
+                antiFraudModule = HasAntiFraudModuleCp,
+                endToEndSecurity = new
+                {
+                    required = RequiredEndToEndSecurityCp?.ToString(),
+                    hardwareSecurityElement = HardwareSecurityElementCp,
+                    responseSecurityEnabled = ResponseSecurityEnabledCp?.ToString(),
+                    commands = SupportedEndToEndSecurityCommands.ToArray(),
+                    commandNonceTimeout = CommandNonceTimeout
+                },
+                persistentDataStore = new { capacity = 0 }
+            };
+
+            var devicePart = GetDeviceCapabilitiesPart();
+
+            var payload = new Dictionary<string, object>
+            {
+                ["common"] = common
+            };
+            if (devicePart != null)
+                payload[DeviceName.ToLower()] = devicePart;
+
+            var resp = new Xfs4Message(MessageType.Completion, "Common.Capabilities", msg.Header.RequestId, payload, status: "success");
+            await SendAsync(socket, resp, _cts!.Token);
+        }
 
         /// <summary>
         /// Disposes the simulator, stopping all tasks and closing the HTTP listener.
