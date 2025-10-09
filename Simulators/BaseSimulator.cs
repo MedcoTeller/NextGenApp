@@ -357,7 +357,7 @@ namespace Simulators
                         var h = handler(conn, msg, cmdTkn);
                         //await Task.WhenAny(h, Task.Delay(-1, cmdTkn));
                         //cmdTkn.ThrowIfCancellationRequested();
-                        await h;
+                        _ = h;
                     }
                     catch (Exception ex)
                     {
