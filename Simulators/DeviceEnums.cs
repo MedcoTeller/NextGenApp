@@ -99,4 +99,17 @@ namespace Simulators
         ifConfigured, // The device is capable of supporting E2E security if correctly configured. If E2E security has not been correctly configured, for example because the required keys are not loaded, commands will complete without a security token.
         always        // A security token will be included with command responses. If E2E security is not correctly configured, for example because the required keys are not loaded, the command will complete with an error.
     }
+
+    /// <summary>
+    /// This command allows the application to specify the transaction state, which the service can then 
+    /// utilize in order to optimize performance. After receiving this command, this service can perform 
+    /// the necessary processing to start or end the customer transaction. 
+    /// This command should be called for every service that could be used in a customer transaction. 
+    /// The transaction state applies to every session.
+    /// </summary>
+    public enum TransactionStateEnum
+    {
+        active,     //- A customer transaction is in progress.
+        inactive    //- No customer transaction is in progress.
+    }
 }

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
 namespace Simulators.Xfs4IoT
@@ -90,6 +91,77 @@ namespace Simulators.Xfs4IoT
             Payload = payload;
         }
 
+        public T? GetPayloadValue<T>(string propertyName)
+        {
+            if (Payload == null)
+                return default;
+
+            try
+            {
+                // Convert object payload to JsonNode for querying
+                var node = JsonSerializer.SerializeToNode(Payload);
+                if (node is JsonObject obj && obj.TryGetPropertyValue(propertyName, out var valueNode))
+                {
+                    return valueNode.Deserialize<T>();
+                }
+            }
+            catch
+            {
+                // ignored
+            }
+
+            return default;
+            //usage:
+            //string? vendor = msg.GetPayloadValue<string>("vendorName");
+
+            //""payload"": {
+            //    ""vendorName"": ""ACME Hardware GmbH"",
+            //    ""services"": [
+            //      { ""serviceURI"": ""wss://ATM1:123/xfs4iot/v1.0/CardReader"" },
+            //      { ""serviceURI"": ""wss://ATM1:123/xfs4iot/v1.0/CashDispenser"" }
+            //    ]
+            //  }
+            //}
+        }
+
+        /// <summary>
+        /// Extracts all nested values from an array of objects, e.g. all 'serviceURI' values from 'services'
+        /// </summary>
+        public List<T>? GetNestedArrayValues<T>(string arrayName, string nestedProperty)
+        {
+            var result = new List<T>();
+
+            if (Payload == null)
+                return result;
+
+            try
+            {
+                var node = JsonSerializer.SerializeToNode(Payload);
+                if (node is JsonObject obj &&
+                    obj.TryGetPropertyValue(arrayName, out var arrayNode) &&
+                    arrayNode is JsonArray array)
+                {
+                    foreach (var element in array)
+                    {
+                        if (element is JsonObject elementObj &&
+                            elementObj.TryGetPropertyValue(nestedProperty, out var nestedNode))
+                        {
+                            var value = nestedNode.Deserialize<T>();
+                            if (value != null)
+                                result.Add(value);
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // ignored
+            }
+            return result;
+            //usage:
+            //List<string>? uris = msg.GetNestedArrayValues<string>("services", "serviceURI");
+        }
+
         /// <summary>
         /// Serialize to JSON string.
         /// </summary>
@@ -99,5 +171,7 @@ namespace Simulators.Xfs4IoT
             opts.Converters.Add(new JsonStringEnumConverter());
             return JsonSerializer.Serialize(this, opts);
         }
+
+        override public string ToString() => ToJson(true);
     }
 }

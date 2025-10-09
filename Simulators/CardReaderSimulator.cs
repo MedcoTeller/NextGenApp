@@ -64,6 +64,21 @@ namespace Simulators.CardReader
 
         }
 
+        public override void RegisterDeviceCommandHandlers()
+        {
+            RegisterCommandHandler("CardReader.ReadCard", ReadCard);
+            RegisterCommandHandler("CardReader.Reset", Reset);
+        }
+        protected override void DeviceGetInterfaceInfo(WebSocket socket, Xfs4Message message, CancellationToken token)
+        {
+            
+        }
+
+        protected override void DeviceSetVersions(WebSocket socket, Xfs4Message message, CancellationToken token)
+        {
+            
+        }
+
         // Replace the anonymous object in GetDeviceCapabilitiesPart with the properties
         protected override object GetDeviceCapabilitiesPart()
         {
@@ -147,7 +162,9 @@ namespace Simulators.CardReader
             };
         }
 
-        private async Task ReadCard(WebSocket socket, Xfs4Message req)
+
+
+        private async Task ReadCard(WebSocket socket, Xfs4Message req, CancellationToken cmdtkn)
         {
             _logger.LogInfo("Simulating card read...");
 
@@ -173,7 +190,7 @@ namespace Simulators.CardReader
         }
 
 
-        private async Task Reset(System.Net.WebSockets.WebSocket socket, Xfs4Message req)
+        private async Task Reset(System.Net.WebSockets.WebSocket socket, Xfs4Message req, CancellationToken cmdtkn)
         {
             var response = new Xfs4Message
             {

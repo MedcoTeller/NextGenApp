@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Channels;
 
 namespace Simulators
@@ -23,13 +24,21 @@ namespace Simulators
         private readonly string _url;
         private HttpListener? _listener;
         private CancellationTokenSource? _workerCts;
-        private readonly ConcurrentDictionary<string, Func<WebSocket, Xfs4Message, Task>> _CommandHandlers = new();
-        private readonly Channel<(Xfs4Message msg, WebSocket conn)> _queue;
+        private readonly ConcurrentDictionary<string, Func<WebSocket, Xfs4Message, CancellationToken, Task>> _CommandHandlers = new();
+        private readonly Channel<(Xfs4Message msg, WebSocket conn, CancellationToken tkn)> _queue;
         private Task? _workerTask;
 
         protected CancellationTokenSource? _cts;
         protected readonly Utils _logger;
         protected readonly List<WebSocket> _allClients = new();
+        protected Xfs4Message CurrentCommand;
+        protected TransactionStateEnum TransactionState = TransactionStateEnum.inactive;
+        protected string TransactionId = string.Empty;
+        protected string CommandNonce = string.Empty;
+        protected string SecureOperation = string.Empty;
+        protected string SecureOperationUniquueId = string.Empty;
+        protected (bool, WebSocket) CancelRequested;
+        protected (int[]?, WebSocket) CancelCoomandIds;
 
         public string ServiceName { get; protected set; }
         public int Port { get; protected set; }
@@ -103,14 +112,34 @@ namespace Simulators
         {
             _url = url;
             _logger = new Utils($"{ServiceName}");
-            _queue = Channel.CreateUnbounded<(Xfs4Message msg, WebSocket conn)>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
+            _queue = Channel.CreateUnbounded<(Xfs4Message msg, WebSocket conn, CancellationToken tkn)>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
             DeviceName = deviceName;
             ServiceName = serviceName;
             ModelName = $"NextGen{DeviceName}SimulatorModel";
+            HostName = new Uri(url).Host;
+            RegisterCommonCommandHandlers();
+            RegisterDeviceCommandHandlers();
+        }
 
-            // Register default handlers for common commands
+        /// <summary>
+        /// Registers handlers for common command types supported by the system.
+        /// </summary>
+        /// <remarks>This method associates predefined command names with their corresponding handler
+        /// methods. It should be called during initialization to ensure that all standard commands are properly
+        /// handled. Calling this method multiple times may result in duplicate registrations, depending on the
+        /// implementation of the underlying registration mechanism.</remarks>
+        private void RegisterCommonCommandHandlers()
+        {
             RegisterCommandHandler("Common.Status", HandleCommonStatusAsync);
             RegisterCommandHandler("Common.Capabilities", HandleCommonCapabilitiesAsync);
+            RegisterCommandHandler("Common.GetTransactionState", HandleGetTransactionState);
+            RegisterCommandHandler("Common.SetTransactionState", HandleSetTransactionState);
+            RegisterCommandHandler("Common.GetCommandNonce", HandleGetCommandNonce);
+            RegisterCommandHandler("Common.ClearCommandNonce", HandleClearCommandNonce);
+            RegisterCommandHandler("Common.StartSecureOperation", HandleStartSecureOperation);
+            RegisterCommandHandler("Common.Cancel", HandleCancel);
+            RegisterCommandHandler("Common.GetInterfaceInfo", HandleGetInterfaceInfo);
+            RegisterCommandHandler("Common.SetVersions", HandleSetVersions);
         }
 
         /// <summary>
@@ -161,7 +190,7 @@ namespace Simulators
         /// </summary>
         /// <param name="command">The command name to handle.</param>
         /// <param name="handler">The handler function to execute for the command.</param>
-        public void RegisterCommandHandler(string command, Func<WebSocket, Xfs4Message, Task> handler)
+        public void RegisterCommandHandler(string command, Func<WebSocket, Xfs4Message, CancellationToken, Task> handler)
         {
             _CommandHandlers[command] = handler;
         }
@@ -237,6 +266,20 @@ namespace Simulators
 
         }
 
+        public virtual void RegisterDeviceCommandHandlers()
+        {
+
+        }
+
+        protected virtual void DeviceGetInterfaceInfo(WebSocket socket, Xfs4Message message, CancellationToken token)
+        {
+            throw new NotImplementedException();
+        }
+        protected virtual void DeviceSetVersions(WebSocket socket, Xfs4Message message, CancellationToken token)
+        {
+            throw new NotImplementedException();
+        }
+
         /// <summary>
         /// Handles communication with a connected WebSocket client, receiving and processing messages.
         /// </summary>
@@ -267,7 +310,11 @@ namespace Simulators
                                 throw new Exception("Deserialized message is null.");
                             OnMessageReceived?.Invoke(req);
                             MessageReceived(req, socket);
-                            _queue.Writer.TryWrite((req, socket));
+                            var ack = new Xfs4Message(MessageType.Acknowledge, req.Header.Name, req.Header.RequestId);
+                            await SendAsync(socket, ack, _cts.Token);
+                            var cmdTkn = new CancellationTokenSource();
+                            if (!_queue.Writer.TryWrite((req, socket, cmdTkn.Token)))
+                                throw new Exception($"Unable to queue command {req}");
                         }
                         catch (Exception ex)
                         {
@@ -295,7 +342,7 @@ namespace Simulators
             {
                 while (reader.TryRead(out var item))
                 {
-                    var (msg, conn) = item;
+                    var (msg, conn, cmdTkn) = item;
                     try
                     {
                         if (!_CommandHandlers.TryGetValue(msg.Header.Name, out var handler))
@@ -306,11 +353,15 @@ namespace Simulators
                             await SendAsync(conn, err, token);
                             continue;
                         }
-                        await handler(conn, msg);
+                        CurrentCommand = msg;
+                        var h = handler(conn, msg, cmdTkn);
+                        //await Task.WhenAny(h, Task.Delay(-1, cmdTkn));
+                        //cmdTkn.ThrowIfCancellationRequested();
+                        await h;
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError($"Handler threw for {msg.Header.Name}: {ex.Message}");
+                        _logger.LogError($"excwption threwn for {msg.Header.Name}: {ex.Message}");
                         // ensure an error completion is sent
                         var err = new Xfs4Message(MessageType.Completion, msg.Header.Name, msg.Header.RequestId, payload: new { error = ex.Message }, status: "internalError");
                         await SendAsync(conn, err, token);
@@ -357,7 +408,7 @@ namespace Simulators
         /// </summary>
         protected virtual object GetDeviceStatusPart()
         {
-            return null;
+            throw new NotImplementedException($"GetDeviceStatusPart not implemented for {DeviceName}");
         }
 
         /// <summary>
@@ -366,7 +417,7 @@ namespace Simulators
         /// </summary>
         protected virtual object GetDeviceCapabilitiesPart()
         {
-            return null;
+            throw new NotImplementedException($"GetDeviceCapabilitiesPart not implemented for {DeviceName}");
         }
 
         /// <summary>
@@ -378,7 +429,7 @@ namespace Simulators
         /// </summary>
         protected virtual IEnumerable<string> SupportedEndToEndSecurityCommands => Array.Empty<string>();
 
-        private async Task HandleCommonStatusAsync(WebSocket socket, Xfs4Message msg)
+        private async Task HandleCommonStatusAsync(WebSocket socket, Xfs4Message msg, CancellationToken cmdtkn)
         {
             var common = GetDeviceCommonStatusPart();
 
@@ -396,7 +447,7 @@ namespace Simulators
         }
 
 
-        private async Task HandleCommonCapabilitiesAsync(WebSocket socket, Xfs4Message msg)
+        private async Task HandleCommonCapabilitiesAsync(WebSocket socket, Xfs4Message msg, CancellationToken cmdtkn)
         {
             var common = new
             {
@@ -446,6 +497,134 @@ namespace Simulators
 
             var resp = new Xfs4Message(MessageType.Completion, "Common.Capabilities", msg.Header.RequestId, payload, status: "success");
             await SendAsync(socket, resp, _cts!.Token);
+        }
+
+        private async Task HandleGetTransactionState(WebSocket socket, Xfs4Message message, CancellationToken cmdtkn)
+        {
+            try
+            {
+                TransactionState = message.Payload?.GetType().GetProperty("state") != null ?
+                    Enum.Parse<TransactionStateEnum>(message.Payload?.GetType().GetProperty("state")!.GetValue(message.Payload)?.ToString()!) :
+                    TransactionStateEnum.inactive;
+                TransactionId = message.Payload?.GetType().GetProperty("transactionId") != null ?
+                    message.Payload?.GetType().GetProperty("transactionId")!.GetValue(message.Payload)?.ToString()! :
+                    string.Empty;
+                return;
+            }
+            catch (Exception)
+            {
+                throw;
+            }
+        }
+
+        private async Task HandleSetTransactionState(WebSocket socket, Xfs4Message message, CancellationToken cmdtkn)
+        {
+            try
+            {
+                var completion = new Xfs4Message
+                {
+                    Header = new Xfs4Header
+                    {
+                        Name = message.Header.Name,
+                        Type = MessageType.Completion,
+                        RequestId = message.Header.RequestId
+                    },
+                    Payload = new
+                    {
+                        state = TransactionState,
+                        transactionId = TransactionId
+                    }
+                };
+            }
+            catch (Exception)
+            {
+                throw;
+            }
+        }
+
+        private async Task HandleClearCommandNonce(WebSocket socket, Xfs4Message message, CancellationToken token)
+        {
+            try
+            {
+                CommandNonce = string.Empty;
+            }
+            catch (Exception)
+            {
+                throw;
+            }
+        }
+
+        private async Task HandleGetCommandNonce(WebSocket socket, Xfs4Message message, CancellationToken token)
+        {
+            try
+            {
+                CommandNonce = Guid.NewGuid().ToString("N").ToUpperInvariant();
+                var completion = new Xfs4Message
+                {
+                    Header = new Xfs4Header
+                    {
+                        Name = message.Header.Name,
+                        Type = MessageType.Completion,
+                        RequestId = message.Header.RequestId
+                    },
+                    Payload = new
+                    {
+                        commandNonce = CommandNonce
+                    }
+                };
+                await SendAsync(socket, completion, token);
+            }
+            catch (Exception)
+            {
+                throw;
+            }
+        }
+
+
+        private async Task HandleStartSecureOperation(WebSocket socket, Xfs4Message message, CancellationToken token)
+        {
+            try
+            {
+                SecureOperationUniquueId = message.Payload?.GetType().GetProperty("uniqueId") != null ?
+                    message.Payload?.GetType().GetProperty("uniqueId")!.GetValue(message.Payload)?.ToString()! :
+                    string.Empty;
+                SecureOperation = message.Payload?.GetType().GetProperty("operation") != null ?
+                    message.Payload?.GetType().GetProperty("operation")!.GetValue(message.Payload)?.ToString()! :
+                    string.Empty;
+
+                var completion = new Xfs4Message
+                {
+                    Header = new Xfs4Header
+                    {
+                        Name = message.Header.Name,
+                        Type = MessageType.Completion,
+                        RequestId = message.Header.RequestId
+                    },
+                    Payload = new { }
+                };
+                await SendAsync(socket, completion, token);
+            }
+            catch (Exception)
+            {
+                throw;
+            }
+        }
+
+        private async Task HandleSetVersions(WebSocket socket, Xfs4Message message, CancellationToken token)
+        {
+            DeviceSetVersions(socket, message, token);
+        }
+
+        private async Task HandleGetInterfaceInfo(WebSocket socket, Xfs4Message message, CancellationToken token)
+        {
+            DeviceGetInterfaceInfo(socket, message, token);
+        }
+
+        private async Task HandleCancel(WebSocket socket, Xfs4Message message, CancellationToken token)
+        {
+            CancelRequested = (true, socket);
+            CancelCoomandIds = (message.GetPayloadValue<int[]>("requestIds"), socket);
+
         }
 
         /// <summary>
