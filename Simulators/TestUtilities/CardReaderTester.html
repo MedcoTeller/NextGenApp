@@ -1,0 +1,218 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>XFS4IoT CardReader Simulator Tester</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f7f9fc;
+            margin: 0;
+            padding: 0;
+        }
+
+        header {
+            background: #003366;
+            color: white;
+            padding: 12px 20px;
+            font-size: 1.2em;
+        }
+
+        .container {
+            display: flex;
+            gap: 20px;
+            padding: 20px;
+        }
+
+        .left, .right {
+            flex: 1;
+        }
+
+        .card-slot {
+            width: 180px;
+            height: 120px;
+            border: 3px solid #003366;
+            border-radius: 10px;
+            background: #e3ebf5;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #003366;
+            margin-bottom: 15px;
+        }
+
+        .card-inserted {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .controls button {
+            display: block;
+            margin-bottom: 10px;
+            width: 180px;
+            padding: 8px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            background: #0059b3;
+            color: white;
+        }
+
+            .controls button:hover {
+                background: #0073e6;
+            }
+
+        .log {
+            background: #111;
+            color: #0f0;
+            padding: 10px;
+            height: 500px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 0.9em;
+            border-radius: 5px;
+        }
+
+        input[type=text] {
+            width: 100%;
+            padding: 6px;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <header>XFS4IoT CardReader Simulator Test Page</header>
+    <div class="container">
+        <div class="left">
+            <h3>Connection</h3>
+            <label>WebSocket URL:</label>
+            <input type="text" id="wsUrl" value="ws://localhost:1234/xfs4iot/v1.0/cardreader/">
+            <button id="connectBtn">Connect</button>
+            <button id="disconnectBtn" disabled>Disconnect</button>
+
+            <h3>Card Slot</h3>
+            <div id="cardSlot" class="card-slot">No Card</div>
+            <div class="controls">
+                <button id="insertCardBtn">Insert Card</button>
+                <button id="ejectCardBtn">Eject Card</button>
+            </div>
+
+            <h3>Commands</h3>
+            <div class="controls">
+                <button data-cmd="Common.Status">Common.Status</button>
+                <button data-cmd="Common.Capabilities">Common.Capabilities</button>
+                <button data-cmd="CardReader.ReadRawData">CardReader.ReadRawData</button>
+                <button data-cmd="CardReader.Reset">CardReader.Reset</button>
+            </div>
+        </div>
+
+        <div class="right">
+            <h3>Message Log</h3>
+            <div class="log" id="log"></div>
+        </div>
+    </div>
+
+    <script>
+let ws;
+let requestCounter = 1;
+let isCardInserted = false;
+const logEl = document.getElementById("log");
+const cardSlotEl = document.getElementById("cardSlot");
+
+function log(msg, isIncoming = false) {
+    const color = isIncoming ? '#0ff' : '#0f0';
+    logEl.innerHTML += `<div style="color:${color}">${new Date().toLocaleTimeString()} → ${msg}</div>`;
+    logEl.scrollTop = logEl.scrollHeight;
+}
+
+function connect() {
+    const url = document.getElementById("wsUrl").value;
+    ws = new WebSocket(url);
+
+    ws.onopen = () => {
+        log(`Connected to ${url}`);
+        document.getElementById("connectBtn").disabled = true;
+        document.getElementById("disconnectBtn").disabled = false;
+    };
+
+    ws.onclose = () => {
+        log("Connection closed.");
+        document.getElementById("connectBtn").disabled = false;
+        document.getElementById("disconnectBtn").disabled = true;
+    };
+
+    ws.onerror = (e) => {
+        log("WebSocket error: " + e.message);
+    };
+
+    ws.onmessage = (event) => {
+        log("← " + event.data, true);
+        try {
+            const msg = JSON.parse(event.data);
+            if (msg.header?.type === "event" && msg.header?.name === "CardReader.MediaInsertedEvent") {
+                setCardState(true);
+            } else if (msg.header?.type === "event" && msg.header?.name === "CardReader.MediaRemovedEvent") {
+                setCardState(false);
+            }
+        } catch { }
+    };
+}
+
+function disconnect() {
+    if (ws) ws.close();
+}
+
+function sendCommand(name, payload = {}) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        alert("WebSocket not connected.");
+        return;
+    }
+    const msg = {
+        header: {
+            type: "command",
+            name,
+            version: "1.0",
+            requestId: requestCounter++,
+            timeout: 10000
+        },
+        payload
+    };
+    const json = JSON.stringify(msg, null, 2);
+    ws.send(json);
+    log("→ " + json);
+}
+
+function setCardState(inserted) {
+    isCardInserted = inserted;
+    if (inserted) {
+        cardSlotEl.textContent = "Card Inserted";
+        cardSlotEl.classList.add("card-inserted");
+    } else {
+        cardSlotEl.textContent = "No Card";
+        cardSlotEl.classList.remove("card-inserted");
+    }
+}
+
+// Hook up buttons
+document.getElementById("connectBtn").onclick = connect;
+document.getElementById("disconnectBtn").onclick = disconnect;
+
+document.querySelectorAll(".controls button[data-cmd]").forEach(btn => {
+    btn.onclick = () => sendCommand(btn.dataset.cmd);
+});
+
+document.getElementById("insertCardBtn").onclick = () => {
+    sendCommand("CardReader.MediaInsertedEvent");
+    setCardState(true);
+};
+
+document.getElementById("ejectCardBtn").onclick = () => {
+    sendCommand("CardReader.MediaRemovedEvent");
+    setCardState(false);
+};
+    </script>
+
+</body>
+</html>

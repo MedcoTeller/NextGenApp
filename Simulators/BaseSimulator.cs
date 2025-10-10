@@ -1,12 +1,13 @@
 ﻿using GlobalShared;
 using Simulators.Xfs4IoT;
 using System.Collections.Concurrent;
-using System.Net;
-using System.Net.WebSockets;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Channels;
+using System.Xml.Linq;
+using WatsonWebsocket;
 
 namespace Simulators
 {
@@ -22,23 +23,33 @@ namespace Simulators
     public class BaseSimulator : IDisposable
     {
         private readonly string _url;
-        private HttpListener? _listener;
+        private WatsonWsServer? _wsServer;
         private CancellationTokenSource? _workerCts;
-        private readonly ConcurrentDictionary<string, Func<WebSocket, Xfs4Message, CancellationToken, Task>> _CommandHandlers = new();
-        private readonly Channel<(Xfs4Message msg, WebSocket conn, CancellationToken tkn)> _queue;
+        private readonly ConcurrentDictionary<string, Func<Guid, Xfs4Message, CancellationToken, Task>> _CommandHandlers = new();
+        // bounded channel to provide backpressure and avoid unbounded memory growth
+        private readonly Channel<(Xfs4Message msg, Guid clientId, CancellationToken tkn)> _queue;
         private Task? _workerTask;
+
+        // track connected clients in a thread-safe way (value is last-seen / connected time)
+        //private readonly ConcurrentDictionary<Guid, DateTime> _clients = new();
+
+        // per-client active command cancellation tokens (so we can cancel running commands for a client if client disconnects)
+        private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _activeCommandTokens = new();
+
+        // limit concurrent outbound send concurrency and avoid overwhelming Watson threads
+        private readonly SemaphoreSlim _sendSemaphore = new SemaphoreSlim(Environment.ProcessorCount * 2);
 
         protected CancellationTokenSource? _cts;
         protected readonly Utils _logger;
-        protected readonly List<WebSocket> _allClients = new();
+        //protected readonly List<Guid> _allClients = new(); // kept for compatibility with existing code that might enumerate list
         protected Xfs4Message CurrentCommand;
         protected TransactionStateEnum TransactionState = TransactionStateEnum.inactive;
         protected string TransactionId = string.Empty;
         protected string CommandNonce = string.Empty;
         protected string SecureOperation = string.Empty;
         protected string SecureOperationUniquueId = string.Empty;
-        protected (bool, WebSocket) CancelRequested;
-        protected (int[]?, WebSocket) CancelCoomandIds;
+        protected (bool, Guid) CancelRequested;
+        protected (int[]?, Guid) CancelCoomandIds;
 
         public string ServiceName { get; protected set; }
         public int Port { get; protected set; }
@@ -49,15 +60,15 @@ namespace Simulators
         // Shared device state / properties
         public bool IsOnline { get; protected set; } = false;
         public DeviceStatusEnum? DeviceStatus { get; protected set; } = DeviceStatusEnum.noDevice;
-        public DevicePositionStatusEnum? DevicePositionStatus { get; private set; } = null;// DevicePositionStatusEnum.notInPosition;
+        public DevicePositionStatusEnum? DevicePositionStatus { get; private set; } = null;
         public int PowerSaveRecoveryTime { get; private set; } = 10;
-        public AntiFraudModuleStatusEnum? AntiFraudModuleStatus { get; private set; } = null;// AntiFraudModuleStatusEnum.ok;
-        public ExchangeStatusEnum? ExchangeStatus { get; private set; } = null;// ExchangeStatusEnum.active;
+        public AntiFraudModuleStatusEnum? AntiFraudModuleStatus { get; private set; } = null;
+        public ExchangeStatusEnum? ExchangeStatus { get; private set; } = null;
         public EndToEndSecurityStatusEnum? EndToEndSecurityStatus { get; private set; } = null;
         public int RemainingCapacityStatus { get; private set; } = 0;
         public DateTime LastHeartbeat { get; protected set; } = DateTime.MinValue;
 
-        // Capabilities: e.g. common capabilities
+        // Capabilities
         protected Dictionary<string, object> CommonCapabilities { get; } = new Dictionary<string, object>();
         public string ServiceVersion { get; private set; } = "1.0.0";
         public string ModelName { get; private set; }
@@ -69,22 +80,7 @@ namespace Simulators
 
         /// <summary>
         /// Gets or sets the timeout period, in seconds, for command nonces before they expire.
-        /// If this device supports end-to-end security and can return a command nonce with the 
-        /// command Common.GetCommandNonce, and the device automatically clears the command nonce 
-        /// after a fixed length of time, this property will report the number of seconds between returning the command nonce and clearing it.
-        /// The value is given in seconds but it should not be assumed that the timeout will be 
-        /// accurate to the nearest second.The nonce may also become invalid before the timeout, for example because of a power failure.
-        /// The device may impose a timeout to reduce the chance of an attacker re-using a nonce 
-        /// value or a token.This timeout will be long enough to support normal operations such as 
-        /// dispense and present including creating the required token on the host and passing it to 
-        /// the device.For example, a command nonce might time out after one hour (that is, 3600 seconds).
-        /// In all other cases, commandNonceTimeout will have a value of zero.Any command nonce will never 
-        /// timeout.It may still become invalid, for example because of a power failure or when explicitly 
-        /// cleared using the Common.ClearCommandNonce command.
         /// </summary>
-        /// <remarks>A command nonce is used to prevent replay attacks or duplicate command execution.
-        /// Adjust this value to control how long a nonce remains valid after issuance. Setting a lower value increases
-        /// security but may require clients to complete operations more quickly.</remarks>
         public int CommandNonceTimeout { get; set; } = 3600;
 
         /// <summary>
@@ -111,12 +107,21 @@ namespace Simulators
         public BaseSimulator(string url, string deviceName, string serviceName)
         {
             _url = url;
-            _logger = new Utils($"{ServiceName}");
-            _queue = Channel.CreateUnbounded<(Xfs4Message msg, WebSocket conn, CancellationToken tkn)>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
+            _logger = new Utils($"{serviceName}"); // use provided service name for logger
+            // create a bounded channel with some reasonable capacity to provide backpressure under burst conditions.
+            // tune capacity as needed (1000 is a typical starting point for device simulators).
+            var options = new BoundedChannelOptions(1000)
+            {
+                SingleReader = true,
+                SingleWriter = false,
+                FullMode = BoundedChannelFullMode.Wait
+            };
+            _queue = Channel.CreateBounded<(Xfs4Message msg, Guid clientId, CancellationToken tkn)>(options);
             DeviceName = deviceName;
             ServiceName = serviceName;
             ModelName = $"NextGen{DeviceName}SimulatorModel";
             HostName = new Uri(url).Host;
+
             RegisterCommonCommandHandlers();
             RegisterDeviceCommandHandlers();
         }
@@ -124,10 +129,6 @@ namespace Simulators
         /// <summary>
         /// Registers handlers for common command types supported by the system.
         /// </summary>
-        /// <remarks>This method associates predefined command names with their corresponding handler
-        /// methods. It should be called during initialization to ensure that all standard commands are properly
-        /// handled. Calling this method multiple times may result in duplicate registrations, depending on the
-        /// implementation of the underlying registration mechanism.</remarks>
         private void RegisterCommonCommandHandlers()
         {
             RegisterCommandHandler("Common.Status", HandleCommonStatusAsync);
@@ -143,23 +144,37 @@ namespace Simulators
         }
 
         /// <summary>
-        /// Starts the simulator, initializing the HTTP listener and worker tasks.
+        /// Starts the simulator, initializing the Watson WebSocket server and worker tasks.
         /// </summary>
-        /// <returns>True if started successfully, false otherwise.</returns>
         public bool Start()
         {
             try
             {
                 _cts = new CancellationTokenSource();
                 _workerCts = new CancellationTokenSource();
-                _listener = new HttpListener();
-                string prefix = $"{_url.TrimEnd('/')}/xfs4iot/v1.0/{ServiceName.ToLowerInvariant()}/";
-                _listener.Prefixes.Add(prefix);
-                _listener.Start();
-                _logger.LogInfo($"Listening on {prefix}");
-                Task.Run(() => AcceptLoop(_cts.Token));
 
-                _workerTask = Task.Run(() => WorkerLoopAsync(_workerCts.Token));
+                // parse host & port from the URL
+                var uri = new Uri(_url);
+                string host = uri.Host;
+                int port = uri.IsDefaultPort ? 80 : uri.Port;
+                Port = port;
+
+                // Initialize Watson server
+                _wsServer = new WatsonWsServer(host, port, false);
+
+                // attach handlers
+                _wsServer.ClientConnected += WsServer_ClientConnected;
+                _wsServer.ClientDisconnected += WsServer_ClientDisconnected;
+                _wsServer.MessageReceived += WsServer_MessageReceived;
+
+                // start server
+                _wsServer.Start();
+
+                _logger.LogInfo($"WatsonWebsocket listening on {host}:{port}");
+
+                // start worker loop that will process queued messages
+                _workerTask = Task.Run(() => WorkerLoopAsync(_workerCts.Token), CancellationToken.None);
+
                 IsOnline = true;
                 DeviceStatus = DeviceStatusEnum.online;
                 LastHeartbeat = DateTime.UtcNow;
@@ -173,79 +188,287 @@ namespace Simulators
         }
 
         /// <summary>
-        /// Stops the simulator asynchronously, cancelling worker and listener tasks.
+        /// Stops the simulator asynchronously, cancelling worker and server.
         /// </summary>
         public async Task StopAsync()
         {
-            _workerCts?.Cancel();
-            _cts?.Cancel();
-            if (_workerTask != null) await _workerTask;
+            // signal cancellation to worker and any in-flight command tokens
+            try
+            {
+                _workerCts?.Cancel();
+                _cts?.Cancel();
 
-            IsOnline = false;
-            DeviceStatus = DeviceStatusEnum.noDevice;
+                // cancel all per-client active command tokens
+                foreach (var kv in _activeCommandTokens)
+                {
+                    try { kv.Value.Cancel(); } catch { /* swallow */ }
+                }
+
+                // detach events before stopping to avoid callbacks during shutdown
+                if (_wsServer != null)
+                {
+                    try
+                    {
+                        _wsServer.ClientConnected -= WsServer_ClientConnected;
+                        _wsServer.ClientDisconnected -= WsServer_ClientDisconnected;
+                        _wsServer.MessageReceived -= WsServer_MessageReceived;
+                    }
+                    catch { /* ignore */ }
+                }
+
+                // stop web socket server
+                try
+                {
+                    _wsServer?.Stop();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError($"Error while stopping Watson server: {ex.Message}");
+                }
+
+                // wait for worker task to finish up to a short timeout
+                if (_workerTask != null)
+                {
+                    var finished = await Task.WhenAny(_workerTask, Task.Delay(TimeSpan.FromSeconds(5)));
+                    if (finished != _workerTask)
+                    {
+                        _logger.LogInfo("Worker did not stop within timeout; continuing shutdown.");
+                    }
+                }
+            }
+            finally
+            {
+                IsOnline = false;
+                DeviceStatus = DeviceStatusEnum.noDevice;
+                _wsServer = null;
+            }
         }
 
         /// <summary>
         /// Registers a command handler for a specific command name.
         /// </summary>
-        /// <param name="command">The command name to handle.</param>
-        /// <param name="handler">The handler function to execute for the command.</param>
-        public void RegisterCommandHandler(string command, Func<WebSocket, Xfs4Message, CancellationToken, Task> handler)
+        public void RegisterCommandHandler(string command, Func<Guid, Xfs4Message, CancellationToken, Task> handler)
         {
             _CommandHandlers[command] = handler;
         }
 
-        /// <summary>
-        /// Sends the specified message to all connected clients whose WebSocket connection is open.
-        /// </summary>
-        /// <remarks>This method blocks until all messages have been sent. If a client is not connected or
-        /// its WebSocket state is not open, the message will not be sent to that client.</remarks>
-        /// <param name="message">The message to broadcast to all active clients. Cannot be null.</param>
-        public void BroadcastMessage(Xfs4Message message)
+
+        protected async Task StatusChange()
         {
-            var tasks = new List<Task>();
-            foreach (var client in _allClients)
+            var common = new
             {
-                if (client.State == WebSocketState.Open)
-                {
-                    tasks.Add(SendAsync(client, message, CancellationToken.None));
-                }
-            }
-            Task.WhenAll(tasks).GetAwaiter().GetResult();
+                device = DeviceStatus.ToString(),
+                devicePosition = DevicePositionStatus?.ToString(),
+                powerSaveRecoveryTime = PowerSaveRecoveryTime,
+                antiFraudModule = AntiFraudModuleStatus?.ToString(),
+                exchange = ExchangeStatus?.ToString(),
+                endToEndSecurity = EndToEndSecurityStatus?.ToString(),
+                persistentDataStore = new { remaining = RemainingCapacityStatus }
+            };
+
+            var payload = new Dictionary<string, object>
+            {
+                ["common"] = common
+            };
+
+            var (devicePart, name) = GetDeviceStatusPart();
+            if (devicePart != null)
+                payload[name] = devicePart;
+
+            var resp = new Xfs4Message(MessageType.Event, "Common.Capabilities", 0, payload, status: "success");
+            await BroadcastMessageAsync(resp, CancellationToken.None);
         }
 
         /// <summary>
-        /// Accepts incoming HTTP connections and upgrades them to WebSocket if requested.
+        /// List of all supported command by the service.
         /// </summary>
-        /// <param name="token">Cancellation token to stop the loop.</param>
-        private async Task AcceptLoop(CancellationToken token)
+        /// <returns></returns>
+        public List<string> SupportedCommands()
         {
-            while (!token.IsCancellationRequested && _listener?.IsListening == true)
+            return _CommandHandlers.Keys.ToList();
+        }
+
+        /// <summary>
+        /// Sends the specified message to all connected clients whose connection is active.
+        /// </summary>
+        /// <remarks>
+        /// This method preserves the original synchronous signature. It will attempt to send asynchronously to all
+        /// clients and will block until those sends complete. If you prefer non-blocking behavior, use
+        /// BroadcastMessageAsync instead.
+        /// </remarks>
+        public async Task BroadcastMessage(Xfs4Message message)
+        {
+            // Keep method signature for compatibility but delegate to async helper and wait with timeout.
+            // Blocking here is intentional to preserve original behaviour; consider calling BroadcastMessageAsync in new code.
+            try
+            {
+                var t = BroadcastMessageAsync(message, CancellationToken.None);
+                t.GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"BroadcastMessage error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Asynchronously broadcast a message to all connected clients.
+        /// </summary>
+        public async Task BroadcastMessageAsync(Xfs4Message message, CancellationToken token)
+        {
+            if (_wsServer == null) return;
+
+            List<Task> tasks = new List<Task>();
+            foreach (var client in _wsServer.ListClients())
+            {
+                tasks.Add(SafeSendToClientAsync(client.Guid, message, token));
+            }
+
+            // run sends concurrently but observe cancellation
+            try
+            {
+                await Task.WhenAll(tasks).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"BroadcastMessageAsync: some sends failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Watson ClientConnected event handler.
+        /// </summary>
+        private void WsServer_ClientConnected(object? sender, ConnectionEventArgs args)
+        {
+            try
+            {
+                OnClientConnected?.Invoke();
+                ClientConnected();
+                _logger.LogInfo($"Client connected: {args.Client}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"ClientConnected handler error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Watson ClientDisconnected event handler.
+        /// </summary>
+        private void WsServer_ClientDisconnected(object? sender, DisconnectionEventArgs args)
+        {
+            try
+            {
+                if (_activeCommandTokens.TryRemove(args.Client.Guid, out var cts))
+                {
+                    try { cts.Cancel(); } catch { /* ignore */ }
+                    try { cts.Dispose(); } catch { /* ignore */ }
+                }
+
+                OnClientDisconnected?.Invoke();
+                _logger.LogInfo($"Client disconnected: {args.Client}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"ClientDisconnected handler error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Watson MessageReceived event handler.
+        /// </summary>
+        private void WsServer_MessageReceived(object? sender, MessageReceivedEventArgs args)
+        {
+            // MessageReceived is called by Watson thread; keep handler fast and non-blocking.
+            _ = Task.Run(async () =>
             {
                 try
                 {
-                    var ctx = await _listener.GetContextAsync();
+                    // decode message bytes -> string
+                    string message;
+                    try
+                    {
+                        message = Encoding.UTF8.GetString(args.Data);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError($"Failed to decode message from {args.Client}: {ex.Message}");
+                        return;
+                    }
 
-                    if (ctx.Request.IsWebSocketRequest)
+                    // Try to deserialize safely. If message is malformed, respond with a completion error
+                    Xfs4Message? req = null;
+                    try
                     {
-                        var wsContext = await ctx.AcceptWebSocketAsync(null);
-                        OnClientConnected?.Invoke();
-                        ClientConnected();
-                        _allClients.Add(wsContext.WebSocket);
-                        _ = HandleClient(wsContext.WebSocket, token);
+                        req = JsonSerializer.Deserialize<Xfs4Message>(message, new JsonSerializerOptions
+                        {
+                            PropertyNameCaseInsensitive = true,
+                            AllowTrailingCommas = true
+                        });
                     }
-                    else
+                    catch (JsonException jex)
                     {
-                        ctx.Response.StatusCode = 400;
-                        ctx.Response.Close();
+                        _logger.LogWarning($"JSON parse error from {args.Client}: {jex.Message}");
+                        // send a completion with invalidRequest error shape (best-effort)
+                        var errMsg = new Xfs4Message(MessageType.Completion, "Invalid.Json", req.Header.RequestId, payload: new { error = "Invalid JSON" }, status: "invalidData");
+                        await SafeSendToClientAsync(args.Client.Guid, errMsg, CancellationToken.None).ConfigureAwait(false);
+                        return;
                     }
+
+                    if (req == null)
+                    {
+                        _logger.LogWarning($"Deserialized message is null from {args.Client}.");
+                        return;
+                    }
+
+                    // invoke public event and virtual hook
+                    OnMessageReceived?.Invoke(req);
+
+                    // map legacy MessageReceived(req, WebSocket) signature to the new signature using clientId
+                    try
+                    {
+                        MessageReceived(req, args.Client.Guid);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError($"MessageReceived hook threw: {ex.Message}");
+                    }
+
+                    // send ack (best-effort)
+                    try
+                    {
+                        var ack = new Xfs4Message(MessageType.Acknowledge, req.Header.Name, req.Header.RequestId);
+                        await SafeSendToClientAsync(args.Client.Guid, ack, CancellationToken.None).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning($"Failed to send ack to {args.Client}: {ex.Message}");
+                    }
+
+                    // prepare a cancellation token source that is tied to the client's lifetime
+                    var perCmdCts = new CancellationTokenSource();
+                    _activeCommandTokens.AddOrUpdate(args.Client.Guid, perCmdCts, (_, old) =>
+                    {
+                        try { old.Cancel(); old.Dispose(); } catch { }
+                        return perCmdCts;
+                    });
+
+                    // queue the command (waits if the bounded channel is full)
+                    var writeOk = await _queue.Writer.WaitToWriteAsync().ConfigureAwait(false);
+                    if (!writeOk)
+                    {
+                        _logger.LogError($"Queue is closed/unwritable; dropping message from {args.Client}.");
+                        return;
+                    }
+
+                     await _queue.Writer.WriteAsync((req, args.Client.Guid, perCmdCts.Token));
+                    // note: WriteAsync completes once the item is accepted without blocking the Watson thread beyond this point.
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
-                    if (!token.IsCancellationRequested)
-                        throw;
+                    _logger.LogError($"Invalid message received: {ex.Message}");
                 }
-            }
+            }).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -253,138 +476,156 @@ namespace Simulators
         /// </summary>
         public virtual void ClientConnected()
         {
-
         }
 
         /// <summary>
         /// Called when a message is received from a client. Can be overridden for custom processing.
         /// </summary>
-        /// <param name="req">The received Xfs4Message.</param>
-        /// <param name="socket">The WebSocket connection.</param>
-        public virtual void MessageReceived(Xfs4Message req, WebSocket socket)
+        public virtual void MessageReceived(Xfs4Message req, Guid clientId)
         {
-
         }
 
         public virtual void RegisterDeviceCommandHandlers()
         {
-
         }
 
-        protected virtual void DeviceGetInterfaceInfo(WebSocket socket, Xfs4Message message, CancellationToken token)
-        {
-            throw new NotImplementedException();
-        }
-        protected virtual void DeviceSetVersions(WebSocket socket, Xfs4Message message, CancellationToken token)
+        protected virtual void DeviceGetInterfaceInfo(Guid clientId, Xfs4Message message, CancellationToken token)
         {
             throw new NotImplementedException();
         }
 
-        /// <summary>
-        /// Handles communication with a connected WebSocket client, receiving and processing messages.
-        /// </summary>
-        /// <param name="socket">The WebSocket client connection.</param>
-        /// <param name="token">Cancellation token to stop the loop.</param>
-        private async Task HandleClient(WebSocket socket, CancellationToken token)
+        protected virtual void DeviceSetVersions(Guid clientId, Xfs4Message message, CancellationToken token)
         {
-            var buffer = new byte[4096];
-            try
-            {
-                while (socket.State == WebSocketState.Open && !token.IsCancellationRequested)
-                {
-                    var result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), token);
-                    if (result.MessageType == WebSocketMessageType.Close)
-                    {
-                        await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closed", token);
-                        OnClientDisconnected?.Invoke();
-                        return;
-                    }
-
-                    if (result.MessageType == WebSocketMessageType.Text)
-                    {
-                        string message = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                        try
-                        {
-                            var req = JsonSerializer.Deserialize<Xfs4Message>(message);
-                            if (req == null)
-                                throw new Exception("Deserialized message is null.");
-                            OnMessageReceived?.Invoke(req);
-                            MessageReceived(req, socket);
-                            var ack = new Xfs4Message(MessageType.Acknowledge, req.Header.Name, req.Header.RequestId);
-                            await SendAsync(socket, ack, _cts.Token);
-                            var cmdTkn = new CancellationTokenSource();
-                            if (!_queue.Writer.TryWrite((req, socket, cmdTkn.Token)))
-                                throw new Exception($"Unable to queue command {req}");
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError($"Invalid message received: {ex.Message}");
-                        }
-                    }
-                }
-            }
-            catch
-            {
-                OnClientDisconnected?.Invoke();
-            }
+            throw new NotImplementedException();
         }
 
         /// <summary>
         /// Worker loop that processes messages from the queue and dispatches them to registered command handlers.
         /// </summary>
-        /// <param name="token">Cancellation token to stop the loop.</param>
         private async Task WorkerLoopAsync(CancellationToken token)
         {
-            //Logger.LogInfo("Worker started.");
             var reader = _queue.Reader;
 
-            while (await reader.WaitToReadAsync(token))
+            while (!token.IsCancellationRequested)
             {
-                while (reader.TryRead(out var item))
+                try
                 {
-                    var (msg, conn, cmdTkn) = item;
-                    try
+                    // Wait for an item to be available (observes cancellation)
+                    if (!await reader.WaitToReadAsync(token).ConfigureAwait(false))
                     {
-                        if (!_CommandHandlers.TryGetValue(msg.Header.Name, out var handler))
-                        {
-                            _logger.LogError($"No handler found for {msg.Header.Name} - {ServiceName}");
-                            var err = new Xfs4Message(MessageType.Completion, msg.Header.Name, msg.Header.RequestId,
-                                payload: new { error = "Unsupported command" }, status: "invalidCommand");
-                            await SendAsync(conn, err, token);
-                            continue;
-                        }
-                        CurrentCommand = msg;
-                        var h = handler(conn, msg, cmdTkn);
-                        //await Task.WhenAny(h, Task.Delay(-1, cmdTkn));
-                        //cmdTkn.ThrowIfCancellationRequested();
-                        _ = h;
+                        break;
                     }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError($"excwption threwn for {msg.Header.Name}: {ex.Message}");
-                        // ensure an error completion is sent
-                        var err = new Xfs4Message(MessageType.Completion, msg.Header.Name, msg.Header.RequestId, payload: new { error = ex.Message }, status: "internalError");
-                        await SendAsync(conn, err, token);
-                    }
-                    finally
-                    {
 
+                    while (reader.TryRead(out var item))
+                    {
+                        var (msg, clientId, cmdTkn) = item;
+
+                        try
+                        {
+                            if (!_CommandHandlers.TryGetValue(msg.Header.Name, out var handler))
+                            {
+                                _logger.LogError($"No handler found for {msg.Header.Name} - {ServiceName}");
+                                var err = new Xfs4Message(MessageType.Completion, msg.Header.Name, msg.Header.RequestId,
+                                    payload: new { error = "Unsupported command" }, status: "invalidCommand");
+                                await SafeSendToClientAsync(clientId, err, token).ConfigureAwait(false);
+                                continue;
+                            }
+
+                            // call handler and observe its cancellation token
+                            // capture task to observe exceptions separately so worker loop continues
+                            var handlerTask = Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    await handler(clientId, msg, cmdTkn).ConfigureAwait(false);
+                                }
+                                catch (OperationCanceledException)
+                                {
+                                    _logger.LogInfo($"Handler for {msg.Header.Name} was canceled for client {clientId}");
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogError($"Exception thrown in handler for {msg.Header.Name}: {ex.Message}");
+                                    var err = new Xfs4Message(MessageType.Completion, msg.Header.Name, msg.Header.RequestId,
+                                        payload: new { error = ex.Message }, status: "internalError");
+                                    try { await SafeSendToClientAsync(clientId, err, CancellationToken.None).ConfigureAwait(false); } catch { }
+                                }
+                                finally
+                                {
+                                    // remove per-client active token if it matches this handler's token
+                                    _activeCommandTokens.TryRemove(clientId, out _);
+                                }
+                            });
+
+                            // don't await here to allow concurrent handling of commands where appropriate.
+                            // but observe exceptions by continuing to next loop; we log/catch inside handlerTask.
+                            _ = handlerTask;
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError($"exception thrown for {msg.Header.Name}: {ex.Message}");
+                            var err = new Xfs4Message(MessageType.Completion, msg.Header.Name, msg.Header.RequestId,
+                                payload: new { error = ex.Message }, status: "internalError");
+                            try { await SafeSendToClientAsync(clientId, err, CancellationToken.None).ConfigureAwait(false); } catch { }
+                        }
                     }
                 }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError($"WorkerLoopAsync error: {ex.Message}");
+                    // short delay to avoid hot-looping on repeated errors
+                    await Task.Delay(100, CancellationToken.None).ConfigureAwait(false);
+                }
             }
+
             _logger.LogInfo($"{ServiceName}-Worker stopped.");
         }
 
         /// <summary>
-        /// Sends a message to the specified WebSocket client asynchronously.
+        /// Sends a message to the specified client asynchronously.
         /// </summary>
-        /// <param name="socket">The WebSocket client connection.</param>
-        /// <param name="message">The Xfs4Message to send.</param>
-        /// <param name="token">Cancellation token for the operation.</param>
-        public async Task SendAsync(WebSocket socket, Xfs4Message message, CancellationToken token)
+        public async Task SendAsync(Guid clientId, Xfs4Message message, CancellationToken token)
         {
-            var bytes = Encoding.UTF8.GetBytes(message.ToJson());
-            await socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, token);
+            // public send wrapper that uses SafeSendToClientAsync internally
+            await SafeSendToClientAsync(clientId, message, token).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Utility that attempts to send to a client safely and will remove a client if it is no longer reachable.
+        /// </summary>
+        private async Task SafeSendToClientAsync(Guid clientId, Xfs4Message message, CancellationToken token)
+        {
+            if (_wsServer == null) throw new InvalidOperationException("Server not started.");
+
+            // throttle concurrent sends
+            await _sendSemaphore.WaitAsync(token).ConfigureAwait(false);
+            try
+            {
+                var json = message.ToJson();
+                try
+                {
+                    await _wsServer.SendAsync(clientId, json).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning($"Send to client {clientId} failed: {ex.Message}. Removing client and cancelling operations.");
+                    // best-effort cleanup for a dead/unresponsive client
+                    
+                    //lock (_allClients) { _allClients.RemoveAll(g => g == clientId); }
+                    if (_activeCommandTokens.TryRemove(clientId, out var cts))
+                    {
+                        try { cts.Cancel(); cts.Dispose(); } catch { }
+                    }
+                }
+            }
+            finally
+            {
+                _sendSemaphore.Release();
+            }
         }
 
         protected virtual object GetDeviceCommonStatusPart()
@@ -396,58 +637,41 @@ namespace Simulators
                 powerSaveRecoveryTime = PowerSaveRecoveryTime,
                 antiFraudModule = AntiFraudModuleStatus?.ToString(),
                 exchange = ExchangeStatus?.ToString(),
-                endToEndSecurity = EndToEndSecurityStatus?.ToString(), // Enum value as string, case-sensitive, null if not supported
+                endToEndSecurity = EndToEndSecurityStatus?.ToString(),
                 persistentDataStore = new { remaining = RemainingCapacityStatus }
             };
             return common;
         }
 
-        /// <summary>
-        /// Handler for Common.Status command — returns shared (common) status plus device-specific status.
-        /// Derived classes should override GetDeviceStatusPart to add their own part.
-        /// </summary>
-        protected virtual object GetDeviceStatusPart()
+        protected virtual (object, string) GetDeviceStatusPart()
         {
             throw new NotImplementedException($"GetDeviceStatusPart not implemented for {DeviceName}");
         }
 
-        /// <summary>
-        /// Handler for Common.Capabilities command — returns shared capabilities + device-specific capabilities.
-        /// Derived classes should override GetDeviceCapabilitiesPart to add their own.
-        /// </summary>
-        protected virtual object GetDeviceCapabilitiesPart()
+        protected virtual (object, string) GetDeviceCapabilitiesPart()
         {
             throw new NotImplementedException($"GetDeviceCapabilitiesPart not implemented for {DeviceName}");
         }
 
-        /// <summary>
-        /// Array of commands which require an E2E token to authorize. These commands will fail if called without a valid token.
-        ///The commands that can be listed here depend on the XFS4IoT standard, but it's possible that the standard will change 
-        ///over time, so for maximum compatibility an application should check this property before calling a command.
-        ///Note that this only includes commands that require a token.Commands that take a nonce and return a token will not be 
-        ///listed here.Those commands can be called without a nonce and will continue to operate in a compatible way.
-        /// </summary>
         protected virtual IEnumerable<string> SupportedEndToEndSecurityCommands => Array.Empty<string>();
 
-        private async Task HandleCommonStatusAsync(WebSocket socket, Xfs4Message msg, CancellationToken cmdtkn)
+        private async Task HandleCommonStatusAsync(Guid clientId, Xfs4Message msg, CancellationToken cmdtkn)
         {
             var common = GetDeviceCommonStatusPart();
-
-            var devicePart = GetDeviceStatusPart();
+            var (devicePart, name) = GetDeviceStatusPart();
 
             var payload = new Dictionary<string, object>
             {
                 ["common"] = common
             };
             if (devicePart != null)
-                payload[DeviceName.ToLower()] = devicePart;
+                payload[name] = devicePart;
 
             var resp = new Xfs4Message(MessageType.Completion, "Common.Status", msg.Header.RequestId, payload, status: "success");
-            await SendAsync(socket, resp, _cts!.Token);
+            await SafeSendToClientAsync(clientId, resp, _cts!.Token).ConfigureAwait(false);
         }
 
-
-        private async Task HandleCommonCapabilitiesAsync(WebSocket socket, Xfs4Message msg, CancellationToken cmdtkn)
+        private async Task HandleCommonCapabilitiesAsync(Guid clientId, Xfs4Message msg, CancellationToken cmdtkn)
         {
             var common = new
             {
@@ -486,20 +710,20 @@ namespace Simulators
                 persistentDataStore = new { capacity = 0 }
             };
 
-            var devicePart = GetDeviceCapabilitiesPart();
+            var (devicePart, name) = GetDeviceCapabilitiesPart();
 
             var payload = new Dictionary<string, object>
             {
                 ["common"] = common
             };
             if (devicePart != null)
-                payload[DeviceName.ToLower()] = devicePart;
+                payload[name] = devicePart;
 
             var resp = new Xfs4Message(MessageType.Completion, "Common.Capabilities", msg.Header.RequestId, payload, status: "success");
-            await SendAsync(socket, resp, _cts!.Token);
+            await SafeSendToClientAsync(clientId, resp, _cts!.Token).ConfigureAwait(false);
         }
 
-        private async Task HandleGetTransactionState(WebSocket socket, Xfs4Message message, CancellationToken cmdtkn)
+        private Task HandleGetTransactionState(Guid clientId, Xfs4Message message, CancellationToken cmdtkn)
         {
             try
             {
@@ -509,15 +733,15 @@ namespace Simulators
                 TransactionId = message.Payload?.GetType().GetProperty("transactionId") != null ?
                     message.Payload?.GetType().GetProperty("transactionId")!.GetValue(message.Payload)?.ToString()! :
                     string.Empty;
-                return;
             }
             catch (Exception)
             {
                 throw;
             }
+            return Task.CompletedTask;
         }
 
-        private async Task HandleSetTransactionState(WebSocket socket, Xfs4Message message, CancellationToken cmdtkn)
+        private Task HandleSetTransactionState(Guid clientId, Xfs4Message message, CancellationToken cmdtkn)
         {
             try
             {
@@ -535,6 +759,7 @@ namespace Simulators
                         transactionId = TransactionId
                     }
                 };
+                return SendAsync(clientId, completion, CancellationToken.None);
             }
             catch (Exception)
             {
@@ -542,98 +767,151 @@ namespace Simulators
             }
         }
 
-        private async Task HandleClearCommandNonce(WebSocket socket, Xfs4Message message, CancellationToken token)
+        private Task HandleClearCommandNonce(Guid clientId, Xfs4Message message, CancellationToken token)
         {
-            try
-            {
-                CommandNonce = string.Empty;
-            }
-            catch (Exception)
-            {
-                throw;
-            }
+            CommandNonce = string.Empty;
+            return Task.CompletedTask;
         }
 
-        private async Task HandleGetCommandNonce(WebSocket socket, Xfs4Message message, CancellationToken token)
+        private async Task HandleGetCommandNonce(Guid clientId, Xfs4Message message, CancellationToken token)
         {
-            try
+            CommandNonce = Guid.NewGuid().ToString("N").ToUpperInvariant();
+            var completion = new Xfs4Message
             {
-                CommandNonce = Guid.NewGuid().ToString("N").ToUpperInvariant();
-                var completion = new Xfs4Message
+                Header = new Xfs4Header
                 {
-                    Header = new Xfs4Header
+                    Name = message.Header.Name,
+                    Type = MessageType.Completion,
+                    RequestId = message.Header.RequestId
+                },
+                Payload = new { commandNonce = CommandNonce }
+            };
+            await SafeSendToClientAsync(clientId, completion, token).ConfigureAwait(false);
+        }
+
+        private async Task HandleStartSecureOperation(Guid clientId, Xfs4Message message, CancellationToken token)
+        {
+            SecureOperationUniquueId = message.Payload?.GetType().GetProperty("uniqueId") != null ?
+                message.Payload?.GetType().GetProperty("uniqueId")!.GetValue(message.Payload)?.ToString()! :
+                string.Empty;
+            SecureOperation = message.Payload?.GetType().GetProperty("operation") != null ?
+                message.Payload?.GetType().GetProperty("operation")!.GetValue(message.Payload)?.ToString()! :
+                string.Empty;
+
+            var completion = new Xfs4Message
+            {
+                Header = new Xfs4Header
+                {
+                    Name = message.Header.Name,
+                    Type = MessageType.Completion,
+                    RequestId = message.Header.RequestId
+                },
+                Payload = new { }
+            };
+            await SafeSendToClientAsync(clientId, completion, token).ConfigureAwait(false);
+        }
+
+        private Task HandleSetVersions(Guid clientId, Xfs4Message message, CancellationToken token)
+        {
+            DeviceSetVersions(clientId, message, token);
+            return Task.CompletedTask;
+        }
+
+        private Task HandleGetInterfaceInfo(Guid clientId, Xfs4Message message, CancellationToken token)
+        {
+            DeviceGetInterfaceInfo(clientId, message, token);
+            return Task.CompletedTask;
+        }
+
+        private async Task HandleCancel(Guid clientId, Xfs4Message msg, CancellationToken cmdtkn)
+        {
+            try
+            {
+                // Try to get the client's current active command token
+                if (_activeCommandTokens.TryGetValue(clientId, out var cts))
+                {
+                    _logger.LogInfo($"Cancel requested by client {clientId} for ongoing command.");
+
+                    try
                     {
-                        Name = message.Header.Name,
-                        Type = MessageType.Completion,
-                        RequestId = message.Header.RequestId
-                    },
-                    Payload = new
-                    {
-                        commandNonce = CommandNonce
+                        cts.Cancel();
+                        cts.Dispose();
                     }
-                };
-                await SendAsync(socket, completion, token);
-            }
-            catch (Exception)
-            {
-                throw;
-            }
-        }
-
-
-        private async Task HandleStartSecureOperation(WebSocket socket, Xfs4Message message, CancellationToken token)
-        {
-            try
-            {
-                SecureOperationUniquueId = message.Payload?.GetType().GetProperty("uniqueId") != null ?
-                    message.Payload?.GetType().GetProperty("uniqueId")!.GetValue(message.Payload)?.ToString()! :
-                    string.Empty;
-                SecureOperation = message.Payload?.GetType().GetProperty("operation") != null ?
-                    message.Payload?.GetType().GetProperty("operation")!.GetValue(message.Payload)?.ToString()! :
-                    string.Empty;
-
-                var completion = new Xfs4Message
-                {
-                    Header = new Xfs4Header
+                    catch (Exception ex)
                     {
-                        Name = message.Header.Name,
-                        Type = MessageType.Completion,
-                        RequestId = message.Header.RequestId
-                    },
-                    Payload = new { }
-                };
-                await SendAsync(socket, completion, token);
+                        _logger.LogWarning($"Error while cancelling client {clientId}: {ex.Message}");
+                    }
+
+                    // Replace with a fresh CTS for subsequent commands
+                    var newCts = new CancellationTokenSource();
+                    _activeCommandTokens[clientId] = newCts;
+
+                    // Send completion acknowledgment back to client
+                    var completion = new Xfs4Message
+                    (
+                        MessageType.Completion,
+                        "Common.Cancel",
+                        msg.Header.RequestId,
+                        payload: new { message = "Command cancelled successfully." },
+                        status: "success"
+                    );
+
+                    await SafeSendToClientAsync(clientId, completion, CancellationToken.None);
+                }
+                else
+                {
+                    // No active command for this client
+                    var completion = new Xfs4Message
+                    (
+                        MessageType.Completion,
+                        "Common.Cancel",
+                        msg.Header.RequestId,
+                        payload: new { message = "No active command to cancel." },
+                        status: "success"
+                    );
+
+                    await SafeSendToClientAsync(clientId, completion, CancellationToken.None);
+                }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                throw;
+                _logger.LogError($"HandleCancel error: {ex.Message}");
+
+                var err = new Xfs4Message
+                (
+                    MessageType.Completion,
+                    "Common.Cancel",
+                    msg.Header.RequestId,
+                    payload: new { error = ex.Message },
+                    status: "internalError"
+                );
+
+                await SafeSendToClientAsync(clientId, err, CancellationToken.None);
             }
         }
 
-        private async Task HandleSetVersions(WebSocket socket, Xfs4Message message, CancellationToken token)
-        {
-            DeviceSetVersions(socket, message, token);
-        }
-
-        private async Task HandleGetInterfaceInfo(WebSocket socket, Xfs4Message message, CancellationToken token)
-        {
-            DeviceGetInterfaceInfo(socket, message, token);
-        }
-
-        private async Task HandleCancel(WebSocket socket, Xfs4Message message, CancellationToken token)
-        {
-            CancelRequested = (true, socket);
-            CancelCoomandIds = (message.GetPayloadValue<int[]>("requestIds"), socket);
-
-        }
 
         /// <summary>
-        /// Disposes the simulator, stopping all tasks and closing the HTTP listener.
+        /// Disposes the simulator, stopping all tasks and closing the WebSocket server.
         /// </summary>
         public void Dispose()
         {
-            StopAsync().GetAwaiter().GetResult();
-            _listener?.Close();
+            // prefer async stop but implement IDisposable for convenience
+            try
+            {
+                StopAsync().GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Dispose encountered an error: {ex.Message}");
+            }
+            finally
+            {
+                // cleanup local resources
+                try { _sendSemaphore.Dispose(); } catch { }
+                foreach (var kv in _activeCommandTokens) { try { kv.Value.Dispose(); } catch { } }
+                _activeCommandTokens.Clear();
+            }
         }
     }
 }

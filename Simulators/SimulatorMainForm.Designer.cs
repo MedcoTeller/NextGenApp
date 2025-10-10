@@ -28,10 +28,16 @@
         /// </summary>
         private void InitializeComponent()
         {
-            this.Text = "ATM Device Simulators";
-            this.Width = 1000;
-            this.Height = 700;
-            this.StartPosition = FormStartPosition.CenterScreen;
+            SuspendLayout();
+            // 
+            // SimulatorMainForm
+            // 
+            ClientSize = new Size(974, 629);
+            Name = "SimulatorMainForm";
+            StartPosition = FormStartPosition.CenterScreen;
+            Text = "ATM Device Simulators";
+            Load += SimulatorMainForm_Load;
+            ResumeLayout(false);
         }
 
         #endregion
