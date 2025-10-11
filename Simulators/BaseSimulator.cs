@@ -29,20 +29,13 @@ namespace Simulators
         // bounded channel to provide backpressure and avoid unbounded memory growth
         private readonly Channel<(Xfs4Message msg, Guid clientId, CancellationToken tkn)> _queue;
         private Task? _workerTask;
-
-        // track connected clients in a thread-safe way (value is last-seen / connected time)
-        //private readonly ConcurrentDictionary<Guid, DateTime> _clients = new();
-
         // per-client active command cancellation tokens (so we can cancel running commands for a client if client disconnects)
         private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _activeCommandTokens = new();
-
         // limit concurrent outbound send concurrency and avoid overwhelming Watson threads
         private readonly SemaphoreSlim _sendSemaphore = new SemaphoreSlim(Environment.ProcessorCount * 2);
 
         protected CancellationTokenSource? _cts;
         protected readonly Utils _logger;
-        //protected readonly List<Guid> _allClients = new(); // kept for compatibility with existing code that might enumerate list
-        protected Xfs4Message CurrentCommand;
         protected TransactionStateEnum TransactionState = TransactionStateEnum.inactive;
         protected string TransactionId = string.Empty;
         protected string CommandNonce = string.Empty;
@@ -77,7 +70,6 @@ namespace Simulators
         public RequiredEndToEndSecurityEnum? RequiredEndToEndSecurityCp { get; private set; } = RequiredEndToEndSecurityEnum.always;
         public bool HardwareSecurityElementCp { get; private set; } = false;
         public ResponseSecurityEnabledEnum? ResponseSecurityEnabledCp { get; private set; } = ResponseSecurityEnabledEnum.always;
-
         /// <summary>
         /// Gets or sets the timeout period, in seconds, for command nonces before they expire.
         /// </summary>
@@ -104,9 +96,9 @@ namespace Simulators
         /// <param name="url">The base URL for the simulator.</param>
         /// <param name="deviceName">The name of the device being simulated.</param>
         /// <param name="serviceName">The name of the service being simulated.</param>
-        public BaseSimulator(string url, string deviceName, string serviceName)
+        public BaseSimulator(string url, string deviceName, string serviceName, bool secureConnextion = false)
         {
-            _url = url;
+            _url = $"{url}/xfs4iot/v1.0/{serviceName}/";
             _logger = new Utils($"{serviceName}"); // use provided service name for logger
             // create a bounded channel with some reasonable capacity to provide backpressure under burst conditions.
             // tune capacity as needed (1000 is a typical starting point for device simulators).
@@ -121,6 +113,18 @@ namespace Simulators
             ServiceName = serviceName;
             ModelName = $"NextGen{DeviceName}SimulatorModel";
             HostName = new Uri(url).Host;
+
+            // parse host & port from the URL
+            var uri = new Uri(_url);
+            Port = uri.IsDefaultPort ? 80 : uri.Port; ;
+
+            // Initialize Watson server
+            _wsServer = new WatsonWsServer(uri.Host, Port, secureConnextion);
+
+            // attach handlers
+            _wsServer.ClientConnected += WsServer_ClientConnected;
+            _wsServer.ClientDisconnected += WsServer_ClientDisconnected;
+            _wsServer.MessageReceived += WsServer_MessageReceived;
 
             RegisterCommonCommandHandlers();
             RegisterDeviceCommandHandlers();
@@ -153,24 +157,10 @@ namespace Simulators
                 _cts = new CancellationTokenSource();
                 _workerCts = new CancellationTokenSource();
 
-                // parse host & port from the URL
-                var uri = new Uri(_url);
-                string host = uri.Host;
-                int port = uri.IsDefaultPort ? 80 : uri.Port;
-                Port = port;
-
-                // Initialize Watson server
-                _wsServer = new WatsonWsServer(host, port, false);
-
-                // attach handlers
-                _wsServer.ClientConnected += WsServer_ClientConnected;
-                _wsServer.ClientDisconnected += WsServer_ClientDisconnected;
-                _wsServer.MessageReceived += WsServer_MessageReceived;
-
                 // start server
                 _wsServer.Start();
 
-                _logger.LogInfo($"WatsonWebsocket listening on {host}:{port}");
+                _logger.LogInfo($"Service {ServiceName} listening on: {_url}");
 
                 // start worker loop that will process queued messages
                 _workerTask = Task.Run(() => WorkerLoopAsync(_workerCts.Token), CancellationToken.None);
@@ -384,11 +374,13 @@ namespace Simulators
             {
                 try
                 {
+
                     // decode message bytes -> string
                     string message;
                     try
                     {
                         message = Encoding.UTF8.GetString(args.Data);
+                        _logger.LogInfo($"Message received: \n{message}");
                     }
                     catch (Exception ex)
                     {
@@ -421,12 +413,12 @@ namespace Simulators
                         return;
                     }
 
-                    // invoke public event and virtual hook
-                    OnMessageReceived?.Invoke(req);
-
-                    // map legacy MessageReceived(req, WebSocket) signature to the new signature using clientId
                     try
                     {
+                        // invoke public event and virtual hook
+                        OnMessageReceived?.Invoke(req);
+
+                        // map legacy MessageReceived(req, WebSocket) signature to the new signature using clientId
                         MessageReceived(req, args.Client.Guid);
                     }
                     catch (Exception ex)
@@ -606,6 +598,8 @@ namespace Simulators
             try
             {
                 var json = message.ToJson();
+                _logger.LogInfo($"Sending: {json}");
+
                 try
                 {
                     await _wsServer.SendAsync(clientId, json).ConfigureAwait(false);
@@ -628,6 +622,18 @@ namespace Simulators
             }
         }
 
+        protected virtual (object, string) GetDeviceStatusPart()
+        {
+            throw new NotImplementedException($"GetDeviceStatusPart not implemented for {DeviceName}");
+        }
+
+        protected virtual (object, string) GetDeviceCapabilitiesPart()
+        {
+            throw new NotImplementedException($"GetDeviceCapabilitiesPart not implemented for {DeviceName}");
+        }
+
+        protected virtual IEnumerable<string> SupportedEndToEndSecurityCommands => Array.Empty<string>();
+
         protected virtual object GetDeviceCommonStatusPart()
         {
             var common = new
@@ -642,18 +648,6 @@ namespace Simulators
             };
             return common;
         }
-
-        protected virtual (object, string) GetDeviceStatusPart()
-        {
-            throw new NotImplementedException($"GetDeviceStatusPart not implemented for {DeviceName}");
-        }
-
-        protected virtual (object, string) GetDeviceCapabilitiesPart()
-        {
-            throw new NotImplementedException($"GetDeviceCapabilitiesPart not implemented for {DeviceName}");
-        }
-
-        protected virtual IEnumerable<string> SupportedEndToEndSecurityCommands => Array.Empty<string>();
 
         private async Task HandleCommonStatusAsync(Guid clientId, Xfs4Message msg, CancellationToken cmdtkn)
         {

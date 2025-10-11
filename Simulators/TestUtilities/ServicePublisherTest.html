@@ -1,0 +1,121 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>XFS4IoT Service Tester</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #fafafa;
+            margin: 20px;
+        }
+
+        h1 {
+            font-size: 20px;
+        }
+
+        input, textarea, button {
+            font-family: monospace;
+        }
+
+        #log {
+            width: 100%;
+            height: 300px;
+            overflow-y: auto;
+            background: #111;
+            color: #0f0;
+            padding: 8px;
+            white-space: pre-wrap;
+        }
+
+        textarea {
+            width: 100%;
+            height: 150px;
+        }
+
+        button {
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>XFS4IoT Service Publisher Test</h1>
+
+    <label>WebSocket URL:</label><br />
+    <input id="wsUrl" type="text" size="50" value="ws://localhost:5846/xfs4iot/v1.0/" />
+    <button id="connectBtn">Connect</button>
+    <button id="disconnectBtn" disabled>Disconnect</button>
+
+    <h3>Send GetServices Command</h3>
+    <textarea id="commandBox">
+{
+  "header": {
+    "type": "command",
+    "name": "ServicePublisher.GetServices",
+    "version": "1.0",
+    "requestId": 1,
+    "timeout": 1000
+  },
+  "payload": { }
+}
+</textarea><br />
+    <button id="sendBtn" disabled>Send</button>
+
+    <h3>Log</h3>
+    <div id="log"></div>
+
+    <script>
+let ws;
+
+function log(msg, isError = false) {
+  const logBox = document.getElementById("log");
+  const line = document.createElement("div");
+  line.textContent = (isError ? "❌ " : "") + msg;
+  logBox.appendChild(line);
+  logBox.scrollTop = logBox.scrollHeight;
+}
+
+document.getElementById("connectBtn").onclick = () => {
+  const url = document.getElementById("wsUrl").value;
+  ws = new WebSocket(url);
+
+  ws.onopen = () => {
+    log(`✅ Connected to ${url}`);
+    document.getElementById("sendBtn").disabled = false;
+    document.getElementById("connectBtn").disabled = true;
+    document.getElementById("disconnectBtn").disabled = false;
+  };
+
+  ws.onmessage = (e) => {
+    log("⬅️ " + e.data);
+  };
+
+  ws.onclose = () => {
+    log("❌ Disconnected");
+    document.getElementById("sendBtn").disabled = true;
+    document.getElementById("connectBtn").disabled = false;
+    document.getElementById("disconnectBtn").disabled = true;
+  };
+
+  ws.onerror = (err) => {
+    log("⚠️ WebSocket error", true);
+    console.error(err);
+  };
+};
+
+document.getElementById("disconnectBtn").onclick = () => {
+  if (ws) ws.close();
+};
+
+document.getElementById("sendBtn").onclick = () => {
+  try {
+    const msg = document.getElementById("commandBox").value;
+    ws.send(msg);
+    log("➡️ " + msg);
+  } catch (err) {
+    log("Error sending message: " + err.message, true);
+  }
+};
+    </script>
+</body>
+</html>
