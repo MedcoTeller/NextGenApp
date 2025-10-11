@@ -62,16 +62,22 @@ namespace SharedLoggerClientLib
                 _accessor.Write(0, writeIndex + 1); // increment write index
                 _accessor.Write(offset + SharedConstants.StatusOffset, (byte)SlotStatus.Full);
 
+                // CHANGED: Use the updated SlotSize from SharedConstants
                 Span<byte> buffer = stackalloc byte[SharedConstants.SlotSize - 1];
                 var id = Guid.NewGuid();
                 var timestamp = DateTime.UtcNow.Ticks;
+
                 Encoding.UTF8.GetBytes(_application.PadRight(32).Substring(0, 32), buffer.Slice(24, 32));
                 Encoding.UTF8.GetBytes(instance.PadRight(32).Substring(0, 32), buffer.Slice(56, 32));
-                Encoding.UTF8.GetBytes(message.PadRight(160).Substring(0, 160), buffer.Slice(88, 160));
+
+                // CHANGED: 160 to 2000 characters for message
+                Encoding.UTF8.GetBytes(message.PadRight(2000).Substring(0, 2000), buffer.Slice(88, 2000));
 
                 id.TryWriteBytes(buffer.Slice(0, 16));
                 BitConverter.TryWriteBytes(buffer.Slice(16, 8), timestamp);
-                buffer[248] = (byte)level;
+
+                // CHANGED: Update level position from 248 to 2088 (88 + 2000)
+                buffer[2088] = (byte)level;
 
                 _accessor.WriteArray(offset + SharedConstants.DataOffset, buffer.ToArray(), 0, buffer.Length);
             }

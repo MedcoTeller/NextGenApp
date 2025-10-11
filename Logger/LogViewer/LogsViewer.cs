@@ -88,14 +88,14 @@ namespace LogViewer
 
             bool newDataAdded = false;
 
-            while (fs.Position + 249 <= fs.Length)
+            while (fs.Position + 2089 <= fs.Length) // New calculation: 16+8+1+32+32+2000 = 2089
             {
                 var id = new Guid(br.ReadBytes(16));
                 var timestamp = new DateTime(br.ReadInt64(), DateTimeKind.Local);
                 var level = (LogLevel)br.ReadByte();
                 var app = Encoding.UTF8.GetString(br.ReadBytes(32)).TrimEnd();
                 var instance = Encoding.UTF8.GetString(br.ReadBytes(32)).TrimEnd();
-                var message = Encoding.UTF8.GetString(br.ReadBytes(160)).TrimEnd();
+                var message = Encoding.UTF8.GetString(br.ReadBytes(2000)).TrimEnd();
 
                 if (allEntries.Any(e => e.Id == id))
                     continue; // skip duplicates if any
@@ -342,7 +342,7 @@ namespace LogViewer
             writer.Write((byte)level);
             writer.Write(Encoding.UTF8.GetBytes(application.PadRight(32).Substring(0, 32)));
             writer.Write(Encoding.UTF8.GetBytes(instance.PadRight(32).Substring(0, 32)));
-            writer.Write(Encoding.UTF8.GetBytes(message.PadRight(160).Substring(0, 160)));
+            writer.Write(Encoding.UTF8.GetBytes(message.PadRight(2000).Substring(0, 2000)));
             writer.Flush();
         }
 

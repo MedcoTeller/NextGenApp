@@ -93,15 +93,14 @@ class Program
                         var timestamp = new DateTime(BitConverter.ToInt64(buffer, 16), DateTimeKind.Local);
                         var application = Encoding.UTF8.GetString(buffer, 24, 32).TrimEnd();
                         var instance = Encoding.UTF8.GetString(buffer, 56, 32).TrimEnd();
-                        var message = Encoding.UTF8.GetString(buffer, 88, 160).TrimEnd();
-                        var level = (LogLevel)buffer[248];
+                        var message = Encoding.UTF8.GetString(buffer, 88, 2000).TrimEnd();
+                        var level = (LogLevel)buffer[2088]; 
 
                         RotateLogFileIfNeeded();
-
                         WriteLogEntry(id, timestamp, level, application, instance, message);
 
-                        accessor.Write(offset + SharedConstants.StatusOffset, (byte)2); // mark as read
-                        accessor.Write(4, readIndex + 1); // update readIndex
+                        accessor.Write(offset + SharedConstants.StatusOffset, (byte)2);
+                        accessor.Write(4, readIndex + 1);
                     }
                 }
                 finally
@@ -161,7 +160,7 @@ class Program
         writer.Write((byte)level);
         writer.Write(Encoding.UTF8.GetBytes(application.PadRight(32).Substring(0, 32)));
         writer.Write(Encoding.UTF8.GetBytes(instance.PadRight(32).Substring(0, 32)));
-        writer.Write(Encoding.UTF8.GetBytes(message.PadRight(160).Substring(0, 160)));
+        writer.Write(Encoding.UTF8.GetBytes(message.PadRight(2000).Substring(0, 2000))); // CHANGED: 160 to 2000
         writer.Flush();
     }
 
