@@ -452,7 +452,6 @@ namespace Simulators.CardReader
             },"cardReader");
         }
 
-
         protected async Task CardReadProcessAsync(Guid socket, Xfs4Message req, CancellationToken cmdtkn)
         {
             await Task.Delay(1500); // simulate hardware delay
