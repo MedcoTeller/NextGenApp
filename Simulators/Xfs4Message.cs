@@ -30,11 +30,31 @@ namespace Simulators.Xfs4IoT
         public MessageType Type { get; set; } = MessageType.Command;
 
         [JsonPropertyName("name")]
-        public string Name { get; set; } = string.Empty;
+        public string? Name { get; set; } = string.Empty;
 
         [JsonPropertyName("status")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public string? Status { get; set; }
+        public CommandStatusEnum? Status { get; set; } = null;
+
+
+        [JsonPropertyName("version")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string Version { get; set; } = "1.0";
+
+
+        [JsonPropertyName("timeout")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? Timeout { get; set; } = null;
+
+
+        [JsonPropertyName("completionCode")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public CompletionCodeEnum? CompletionCode { get; set; } = null;
+
+
+        [JsonPropertyName("errorDiscription")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ErrorDiscription { get; set; } = null;
     }
 
     /// <summary>
@@ -79,7 +99,7 @@ namespace Simulators.Xfs4IoT
         /// <param name="requestId">Nullable requestId: required for commands/completions, null for unsolicited events</param>
         /// <param name="payload">Optional payload object (will be serialized)</param>
         /// <param name="status">Optional status (used for completion)</param>
-        public Xfs4Message(MessageType type, string name, int? requestId = null, object? payload = null, string? status = null)
+        public Xfs4Message(MessageType type, string? name, int? requestId = null, object? payload = null, CommandStatusEnum? status = null)
         {
             Header = new Xfs4Header
             {

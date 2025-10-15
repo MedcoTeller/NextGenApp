@@ -1,3 +1,14 @@
+using Microsoft.VisualBasic.ApplicationServices;
+using System.Diagnostics.Metrics;
+using System.Runtime.ConstrainedExecution;
+using System.Security.Cryptography;
+using System.Security.Policy;
+using System.Threading;
+using System.Windows.Forms;
+using static System.Runtime.InteropServices.JavaScript.JSType;
+using static System.Windows.Forms.DataFormats;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement.TaskbarClock;
+
 namespace Simulators
 {
     /// <summary>
@@ -112,4 +123,42 @@ namespace Simulators
         active,     //- A customer transaction is in progress.
         inactive    //- No customer transaction is in progress.
     }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    public enum CommandStatusEnum
+    {
+        invalidMessage,     // - The JSON in the message is invalid and can't be parsed.
+        invalidRequestID,   // - The request ID on the command is invalid. This could be because the value is not an integer, has a zero value, or because a command with the same request ID from the same client is already queued or is executing.
+        tooManyRequests,    // - The service has currently received and queued more requests than it can process.
+    }
+
+    public enum CompletionCodeEnum
+    {
+        commandErrorCode,       // - Check the errorCode property for the command specific error code.
+        canceled,               // - Canceled using the Common.Cancel command.
+        timeOut,                //- Timed out after the client specified timeout.
+        deviceNotReady,         // - The device is not ready or timed out.
+        hardwareError,          // - An error occurred on the device.
+        internalError,          // - An internal inconsistency or other unexpected error occurred.
+        invalidCommand,         // - The command is not supported by the service.
+        invalidRequestID,       // - The requestId is invalid.
+        unsupportedCommand,     // - The command is valid for the interface but is not supported by the service or device.
+        invalidData,            // - The command message contains invalid data.
+        userError,              // - The user is preventing proper operation of the device.
+        unsupportedData,        // - The command message contains data that is valid for the interface command but is not supported by the service or device.
+        fraudAttempt,           // - The user is attempting a fraudulent act on the device.
+        sequenceError,          // - The command request is not valid at this time or in the device's current state.
+        authorizationRequired,  // - The command request cannot be performed because it requires authorization.
+        noCommandNonce,         // - The value of the nonce stored in the hardware was cleared, for example by a power failure.
+        invalidToken,           // - The security token is invalid.
+        invalidTokenNonce,      // - The value of the nonce in the security token does not match the stored value.
+        invalidTokenHMAC,       // - The value of the HMAC in the security token is incorrect.
+        invalidTokenFormat,     // - The token format version value is not recognized, or the token format is somehow invalid.
+        invalidTokenKeyNoValue, // - The key used for the HMAC for a token has not been loaded and the token cannot be validated.
+        notEnoughSpace,         // - There is not enough space on the storage.
+    }
+
+
 }

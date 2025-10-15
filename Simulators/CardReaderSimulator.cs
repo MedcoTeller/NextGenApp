@@ -2,7 +2,7 @@
 using System.Net.WebSockets;
 
 namespace Simulators.CardReader
-{    
+{
     public class CardReaderSimulator : BaseSimulator
     {
 
@@ -19,49 +19,58 @@ namespace Simulators.CardReader
         }
 
         // Device status properties (get only, set private)
-        public MediaStatusEnum MediaStatus { get; private set; } = MediaStatusEnum.unknown;
+        public MediaStatusEnum MediaStatus { get; private set; } = MediaStatusEnum.notPresent;
         public SecurityStatusEnum? SecurityStatus { get; private set; } = SecurityStatusEnum.notReady;
-        public ChipPowerStatusEnum? ChipPowerStatus { get; private set; } = ChipPowerStatusEnum.unknown;
+        public ChipPowerStatusEnum? ChipPowerStatus { get; private set; } = ChipPowerStatusEnum.noCard;
         public ChipModuleStatusEnum? ChipModuleStatus { get; private set; } = ChipModuleStatusEnum.ok;
-        public MagWriteModuleStatusEnum? MagWriteModuleStatus { get; private set; } = MagWriteModuleStatusEnum.ok;
-        public FrontImageModuleStatusEnum? FrontImageModuleStatus { get; private set; } = FrontImageModuleStatusEnum.ok;
-        public string BackImageModuleStatus { get; private set; } = "ok";
+        public MagWriteModuleStatusEnum? MagWriteModuleStatus { get; private set; } = MagWriteModuleStatusEnum.unknown;
+        public FrontImageModuleStatusEnum? FrontImageModuleStatus { get; private set; } = FrontImageModuleStatusEnum.unknown;
+        public string BackImageModuleStatus { get; private set; } = "unknown";
 
 
         // Add these properties to CardReaderSimulator (set protected, get public)
-        public bool Track1 { get; protected set; } = false;
-        public bool Track2 { get; protected set; } = false;
-        public bool Track3 { get; protected set; } = false;
-        public bool Watermark { get; protected set; } = false;
-        public bool FrontImage { get; protected set; } = false;
-        public bool BackImage { get; protected set; } = false;
-        public bool Track1JIS { get; protected set; } = false;
-        public bool Track3JIS { get; protected set; } = false;
-        public bool Ddi { get; protected set; } = false;
-        public bool ChipT0 { get; protected set; } = false;
-        public bool ChipT1 { get; protected set; } = false;
-        public bool ChipProtocolNotRequired { get; protected set; } = false;
-        public bool ChipTypeAPart3 { get; protected set; } = false;
-        public bool ChipTypeAPart4 { get; protected set; } = false;
-        public bool ChipTypeB { get; protected set; } = false;
-        public bool ChipTypeNFC { get; protected set; } = false;
-        public SecurityTypeEnum? SecurityType { get; protected set; } = SecurityTypeEnum.mm;
-        public string PowerOnOption { get; protected set; } = "exit";
-        public string PowerOffOption { get; protected set; } = "exit";
-        public bool FluxSensorProgrammable { get; protected set; } = false;
-        public bool ReadWriteAccessFromExit { get; protected set; } = false;
-        public bool Loco { get; protected set; } = false;
-        public bool Hico { get; protected set; } = false;
-        public bool Auto { get; protected set; } = false;
-        public bool Cold { get; protected set; } = false;
-        public bool Warm { get; protected set; } = false;
-        public bool Off { get; protected set; } = false;
-        public bool Siemens4442 { get; protected set; } = false;
-        public bool Gpm896 { get; protected set; } = false;
-        public bool Exit { get; protected set; } = false;
-        public bool Transport { get; protected set; } = false;
-        public bool CardTakenSensor { get; protected set; } = false;
+        public bool Track1Cp { get; protected set; } = false;
+        public bool Track2Cp { get; protected set; } = false;
+        public bool Track3Cp { get; protected set; } = false;
+        public bool WatermarkCp { get; protected set; } = false;
+        public bool FrontImageCp { get; protected set; } = false;
+        public bool BackImageCp { get; protected set; } = false;
+        public bool Track1JISCp { get; protected set; } = false;
+        public bool Track3JISCp { get; protected set; } = false;
+        public bool DdiCp { get; protected set; } = false;
+        public bool ChipT0Cp { get; protected set; } = false;
+        public bool ChipT1Cp { get; protected set; } = false;
+        public bool ChipProtocolNotRequiredCp { get; protected set; } = false;
+        public bool ChipTypeAPart3Cp { get; protected set; } = false;
+        public bool ChipTypeAPart4Cp { get; protected set; } = false;
+        public bool ChipTypeBCp { get; protected set; } = false;
+        public bool ChipTypeNFCCp { get; protected set; } = false;
+        public SecurityTypeEnum? SecurityTypeCp { get; protected set; } = SecurityTypeEnum.mm;
+        public string PowerOnOptionCp { get; protected set; } = "exit";
+        public string PowerOffOptionCp { get; protected set; } = "exit";
+        public bool FluxSensorProgrammableCp { get; protected set; } = false;
+        public bool ReadWriteAccessFromExitCp { get; protected set; } = false;
+        public bool LocoCp { get; protected set; } = false;
+        public bool HicoCp { get; protected set; } = false;
+        public bool AutoCp { get; protected set; } = false;
+        public bool ColdCp { get; protected set; } = false;
+        public bool WarmCp { get; protected set; } = false;
+        public bool OffCp { get; protected set; } = false;
+        public bool Siemens4442Cp { get; protected set; } = false;
+        public bool Gpm896Cp { get; protected set; } = false;
+        public bool ExitCp { get; protected set; } = false;
+        public bool TransportCp { get; protected set; } = false;
+        public bool CardTakenSensorCp { get; protected set; } = false;
         public CardReaderTypeEnum? CardReaderTypeCp { get; private set; } = CardReaderTypeEnum.motor;
+
+        public List<CardData> ConfiguredCards { get; set; } = new() { new CardData() { Track1 = "test tck1", ChipData = "Chip data test", Track2 = "test trk2" } };
+        // Simulated properties to control card insertion and removal
+        public bool CardInserted { get; set; }
+        public bool CardTaken { get; set; }
+
+        public List<string> BreakPoint = new();
+
+        public int CurrentCardIndex { get; set; } = 0;
 
         public override void ClientConnected()
         {
@@ -361,12 +370,12 @@ namespace Simulators.CardReader
 
         protected override void DeviceGetInterfaceInfo(Guid socket, Xfs4Message message, CancellationToken token)
         {
-            
+
         }
 
         protected override void DeviceSetVersions(Guid socket, Xfs4Message message, CancellationToken token)
         {
-            
+
         }
 
         // Replace the anonymous object in GetDeviceCapabilitiesPart with the properties
@@ -377,64 +386,64 @@ namespace Simulators.CardReader
                 type = CardReaderTypeCp?.ToString(),
                 readTracks = new
                 {
-                    track1 = Track1,
-                    track2 = Track2,
-                    track3 = Track3,
-                    watermark = Watermark,
-                    frontImage = FrontImage,
-                    backImage = BackImage,
-                    track1JIS = Track1JIS,
-                    track3JIS = Track3JIS,
-                    ddi = Ddi
+                    track1 = Track1Cp,
+                    track2 = Track2Cp,
+                    track3 = Track3Cp,
+                    watermark = WatermarkCp,
+                    frontImage = FrontImageCp,
+                    backImage = BackImageCp,
+                    track1JIS = Track1JISCp,
+                    track3JIS = Track3JISCp,
+                    ddi = DdiCp
                 },
                 writeTracks = new
                 {
-                    track1 = Track1,
-                    track2 = Track2,
-                    track3 = Track3,
-                    watermark = Watermark,
-                    frontImage = FrontImage,
-                    track1JIS = Track1JIS,
-                    track3JIS = Track3JIS,
+                    track1 = Track1Cp,
+                    track2 = Track2Cp,
+                    track3 = Track3Cp,
+                    watermark = WatermarkCp,
+                    frontImage = FrontImageCp,
+                    track1JIS = Track1JISCp,
+                    track3JIS = Track3JISCp,
                 },
                 chipProtocols = new
                 {
-                    chipT0 = ChipT0,
-                    chipT1 = ChipT1,
-                    chipProtocolNotRequired = ChipProtocolNotRequired,
-                    chipTypeAPart3 = ChipTypeAPart3,
-                    chipTypeAPart4 = ChipTypeAPart4,
-                    chipTypeB = ChipTypeB,
-                    chipTypeNFC = ChipTypeNFC
+                    chipT0 = ChipT0Cp,
+                    chipT1 = ChipT1Cp,
+                    chipProtocolNotRequired = ChipProtocolNotRequiredCp,
+                    chipTypeAPart3 = ChipTypeAPart3Cp,
+                    chipTypeAPart4 = ChipTypeAPart4Cp,
+                    chipTypeB = ChipTypeBCp,
+                    chipTypeNFC = ChipTypeNFCCp
                 },
-                securityType = SecurityType?.ToString(),
-                powerOnOption = PowerOnOption,
-                powerOffOption = PowerOffOption,
-                fluxSensorProgrammable = FluxSensorProgrammable,
-                readWriteAccessFromExit = ReadWriteAccessFromExit,
+                securityType = SecurityTypeCp?.ToString(),
+                powerOnOption = PowerOnOptionCp,
+                powerOffOption = PowerOffOptionCp,
+                fluxSensorProgrammable = FluxSensorProgrammableCp,
+                readWriteAccessFromExit = ReadWriteAccessFromExitCp,
                 writeMode = new
                 {
-                    loco = Loco,
-                    hico = Hico,
-                    auto = Auto
+                    loco = LocoCp,
+                    hico = HicoCp,
+                    auto = AutoCp
                 },
                 chipPower = new
                 {
-                    cold = Cold,
-                    warm = Warm,
-                    off = Off
+                    cold = ColdCp,
+                    warm = WarmCp,
+                    off = OffCp
                 },
                 memoryChipProtocols = new
                 {
-                    siemens4442 = Siemens4442,
-                    gpm896 = Gpm896
+                    siemens4442 = Siemens4442Cp,
+                    gpm896 = Gpm896Cp
                 },
                 positions = new
                 {
-                    exit = Exit,
-                    transport = Transport
+                    exit = ExitCp,
+                    transport = TransportCp
                 },
-                cardTakenSensor = CardTakenSensor
+                cardTakenSensor = CardTakenSensorCp
             }, "cardReader");
         }
 
@@ -449,38 +458,70 @@ namespace Simulators.CardReader
                 magWriteModule = MagWriteModuleStatus?.ToString(),
                 frontImageModule = FrontImageModuleStatus?.ToString(),
                 backImageModule = BackImageModuleStatus
-            },"cardReader");
+            }, "cardReader");
         }
 
-        protected async Task CardReadProcessAsync(Guid socket, Xfs4Message req, CancellationToken cmdtkn)
+        private Task CancelationCheckAsync(CancellationToken token)
         {
-            await Task.Delay(1500); // simulate hardware delay
-            var cancel = Task.Run(() => {
-                while (!cmdtkn.IsCancellationRequested)
+            return Task.Run(() =>
+            {
+                while (!token.IsCancellationRequested)
                 {
-                    cmdtkn.ThrowIfCancellationRequested();
-                    Task.Delay(100).Wait();
+                    try
+                    {
+                        token.ThrowIfCancellationRequested();
+                        Task.Delay(100).Wait();
+                    }
+                    catch (Exception)
+                    {
+                        _logger.LogError("Operation canceled.");
+                    }
                 }
             });
+        }
 
-            var completion = new Xfs4Message
+        protected async Task EnableCardReaderAndWaitForCard(Guid socket, Xfs4Message req, CancellationToken cmdtkn)
+        {
+            //wait for card to be inserted
+            _logger.LogInfo("Waiting for card to be inserted...");
+            var insertEvent = new Xfs4Message
             {
                 Header = new Xfs4Header
                 {
-                    Name = "CardReader.ReadCard",
-                    Type = MessageType.Completion,
+                    Name = InsertCardEvent,
+                    Type = MessageType.Event,
                     RequestId = req.Header.RequestId
                 },
-                Payload = new
-                {
-                    Status = "Success",
-                    CardData = "1234-5678-9012-3456"
-                }
+                Payload = new { }
+            };
+            await SendAsync(socket, insertEvent, cmdtkn);
+            OnStatusChange?.Invoke("ReaderEnabled");
+
+            while (!CardInserted)
+            {
+                await Task.Delay(100);
+            }
+            MediaStatus = MediaStatusEnum.entering;
+            OnStatusChange?.Invoke("CardInserted");
+            await Task.Delay(500);
+            MediaStatus = MediaStatusEnum.present;
+            OnStatusChange?.Invoke("CardInserted");
+            _logger.LogInfo("Card Inserted.");
+        }
+
+        private async Task<CardData> ProcessCardData()
+        {
+            //will need to get simulated card data from configuration
+            CardData cardData = new CardData
+            {
+                Track1 = "B1234567890123456^CARD/USER^25121010000000000000?",
+                Track2 = "1234567890123456=25121010000000000000?",
+                Track3 = "12345678901234567890=25121010000000000000?",
+                ChipData = "O2gAUACFyEARAJAC"
             };
 
-            await SendAsync(socket, completion, _cts.Token);
-            _logger.LogInfo("Card read completed.");
-            //return Task.CompletedTask;
+            return cardData;
+            //throw new NotImplementedException();
         }
 
         private async Task ReadCard(Guid socket, Xfs4Message req, CancellationToken cmdtkn)
@@ -505,6 +546,66 @@ namespace Simulators.CardReader
                 //  "track3JIS": false,
                 //  "ddi": false
                 //}
+                _logger.LogInfo("Card read...");
+                var timeout = req.Header.Timeout;
+                if (timeout is null || timeout.Value < 0)
+                {
+                    //reject command
+
+                }
+
+                var readTask = EnableCardReaderAndWaitForCard(socket, req, cmdtkn);
+                var cancelReadTask = Task.Delay(Timeout.Infinite, cmdtkn);
+                var timeoutTsk = Task.Delay(timeout.Value == 0 ? Timeout.Infinite : timeout.Value);
+
+                var finished = await Task.WhenAny(readTask, cancelReadTask, timeoutTsk);
+
+                switch (finished)
+                {
+                    case var t when t == timeoutTsk:
+                        _logger.LogWarning("[CardReader] ReadRawData timed out.");
+                        //send timeout completion
+                        var timeoutCompletion = new Xfs4Message
+                        {
+                            Header = new Xfs4Header
+                            {
+                                Name = req.Header.Name,
+                                Type = MessageType.Completion,
+                                RequestId = req.Header.RequestId,
+                                CompletionCode = CompletionCodeEnum.timeOut,
+                                ErrorDiscription = "ReadCard command timed out."
+                            },
+                            Payload = new
+                            {
+                                errorCode = "timeOut"
+                            }
+                        };
+                        await SendAsync(socket, timeoutCompletion, _cts.Token);
+                        break;
+                    case var t when t == cancelReadTask:
+                        //send cancel completion
+                        break;
+                }
+
+                await readTask; // completes normally
+                var insertedEvent = new Xfs4Message
+                {
+                    Header = new Xfs4Header
+                    {
+                        Name = MediaInsertedEvent,
+                        Type = MessageType.Event
+                    },
+                    Payload = new { }
+                };
+                await SendAsync(socket, insertedEvent, _cts.Token);
+
+                var crdData = await ProcessCardData();
+
+                bool invalidCard = false; //determine from card data
+                if (crdData == null)
+                {
+                    invalidCard = true;
+                }
 
                 //***************** Completion Message *****************
                 //Payload, Version 3.0
@@ -538,37 +639,161 @@ namespace Simulators.CardReader
                 //  "ddi": See track1 properties
                 //}
 
+                /*
+                 errorCode:
+                    mediaJam - The card is jammed. Operator intervention is required.
+                    shutterFail - The open of the shutter failed due to manipulation or hardware error. Operator intervention is required.
+                    noMedia - The card was removed before completion of the read action (the event CardReader.MediaInsertedEvent has been generated). For motor driven devices, the read is disabled; i.e. another command has to be issued to enable the reader for card entry.
+                    invalidMedia - No track or chip found; card may have been inserted or pulled through the wrong way.
+                    cardTooShort - The card that was inserted is too short. When this error occurs the card remains at the exit slot.
+                    cardTooLong - The card that was inserted is too long. When this error occurs the card remains at the exit slot.
+                    securityFail - The security module failed reading the card's security and no other data source was requested.
+                    cardCollision - There was an unresolved collision of two or more contactless card signals.                 
+                 */
+
+                if (invalidCard)
+                {
+                    var invalidEvent = new Xfs4Message
+                    {
+                        Header = new Xfs4Header
+                        {
+                            Name = InvalidMediaEvent,
+                            Type = MessageType.Event
+                        },
+                        Payload = new { }
+                    };
+                    await SendAsync(socket, invalidEvent, _cts.Token);
+
+                    _logger.LogWarning("Invalid card inserted.");
+                    //send completion with invalid media error
+                    var completionError = new Xfs4Message
+                    {
+                        Header = new Xfs4Header
+                        {
+                            Name = "CardReader.ReadCard",
+                            Type = MessageType.Completion,
+                            RequestId = req.Header.RequestId
+                        },
+                        Payload = new
+                        {
+                            errorCode = CardReaderErrorCode.invalidMedia
+                        }
+                    };
+
+                    await SendAsync(socket, completionError, _cts.Token);
+                    _logger.LogInfo("Card read completed. >> InvalidCard");
+                    return;
+                }
+
+                _logger.LogInfo("Check detected traks.");
+                var tracksDetectedEvent = new Xfs4Message
+                {
+                    Header = new Xfs4Header
+                    {
+                        Name = TrackDetectedEvent,
+                        Type = MessageType.Event
+                    },
+                    Payload = new
+                    {
+                        track1 = crdData.Track1 != null,
+                        track2 = crdData.Track2 != null,
+                        track3 = crdData.Track3 != null,
+                        watermark = false,
+                        chip = crdData.ChipData != null
+                    }
+                };
+                await SendAsync(socket, tracksDetectedEvent, _cts.Token);
+
+
+                var completion = new Xfs4Message
+                {
+                    Header = new Xfs4Header
+                    {
+                        Name = req.Header.Name,
+                        Type = MessageType.Completion,
+                        RequestId = req.Header.RequestId
+                    },
+                    Payload = new
+                    {
+                        track1 = crdData.Track1 == null ? null : new
+                        {
+                            status = true,
+                            data = crdData.Track1
+                        },
+                        track2 = crdData.Track2 == null ? null : new
+                        {
+                            status = true,
+                            data = crdData.Track2
+                        },
+                        track3 = crdData.Track3 == null ? null : new
+                        {
+                            status = true,
+                            data = crdData.Track3
+                        },
+                        chip = crdData.ChipData == null ? null : new
+                        {
+                            status = true,
+                            data = crdData.ChipData
+                        }
+                    }
+                };
+                await SendAsync(socket, completion, _cts.Token);
+
                 //***************** Event Messages*****************
                 //CardReader.InsertCardEvent
                 //CardReader.MediaInsertedEvent
                 //CardReader.InvalidMediaEvent
                 //CardReader.TrackDetectedEvent
-                _logger.LogInfo("Simulating card read...");
-                var readTask = CardReadProcessAsync(socket, req, cmdtkn);
-                var cancelTask = Task.Delay(Timeout.Infinite, cmdtkn);
+                //CardReader.EMVClessReadStatusEvent
 
-                var finished = await Task.WhenAny(readTask, cancelTask);
+                //**************** Unsolicited Messages ************
+                //CardReader.MediaRemovedEvent
+                //CardReader.CardActionEvent
+                //CardReader.MediaDetectedEvent
 
-                if (finished == cancelTask)
-                    throw new OperationCanceledException(cmdtkn);
-
-                await readTask; // completes normally
                 _logger.LogInfo("Card read completed.");
             }
             catch (OperationCanceledException)
             {
                 _logger.LogWarning("[CardReader] ReadRawData canceled by client.");
-                //await SendAsync(socket, msg, "CardReader.ReadRawData", "canceled",
-                    //new { message = "Command canceled by user." });
+                var timeoutCompletion = new Xfs4Message
+                {
+                    Header = new Xfs4Header
+                    {
+                        Name = req.Header.Name,
+                        Type = MessageType.Completion,
+                        RequestId = req.Header.RequestId,
+                        CompletionCode = CompletionCodeEnum.timeOut,
+                        ErrorDiscription = "ReadCard command timed out."
+                    },
+                    Payload = new
+                    {
+                        errorCode = "timeOut"
+                    }
+                };
+                await SendAsync(socket, timeoutCompletion, _cts.Token);
             }
             catch (Exception ex)
             {
-                _logger.LogError($"[CardReader] ReadRawData error: {ex.Message}");
-                //await SendAsync(socket, msg, "CardReader.ReadRawData", "internalError",
-                    //new { error = ex.Message });
+                _logger.LogError($"[CardReader] ReadRawData error: {ex.Message} - {ex.StackTrace}");
+                var errorCompletion = new Xfs4Message
+                {
+                    Header = new Xfs4Header
+                    {
+                        Name = req.Header.Name,
+                        Type = MessageType.Completion,
+                        RequestId = req.Header.RequestId,
+                        CompletionCode = CompletionCodeEnum.internalError,
+                        ErrorDiscription = $"{ex.Message}"
+                    },
+                    Payload = new
+                    {
+                        errorCode = "timeOut"
+                    }
+                };
+                await SendAsync(socket, errorCompletion, _cts.Token);
             }
         }
-
 
         private async Task Reset(Guid socket, Xfs4Message req, CancellationToken cmdtkn)
         {
@@ -602,5 +827,13 @@ namespace Simulators.CardReader
             };
             await SendAsync(socket, response, _cts.Token);
         }
+    }
+
+    public class CardData
+    {
+        public string? Track1 { get; set; } = null;
+        public string? Track2 { get; set; } = null;
+        public string? Track3 { get; set; } = null;
+        public string? ChipData { get; set; } = null;
     }
 }

@@ -1,12 +1,9 @@
 ﻿using GlobalShared;
 using Simulators.Xfs4IoT;
 using System.Collections.Concurrent;
-using System.Linq;
 using System.Text;
 using System.Text.Json;
-using System.Threading;
 using System.Threading.Channels;
-using System.Xml.Linq;
 using WatsonWebsocket;
 
 namespace Simulators
@@ -34,6 +31,7 @@ namespace Simulators
         // limit concurrent outbound send concurrency and avoid overwhelming Watson threads
         private readonly SemaphoreSlim _sendSemaphore = new SemaphoreSlim(Environment.ProcessorCount * 2);
 
+        protected readonly string ConfigFolder = @"C:\ProgramData\NextGen\Simulators\Device Configurations";
         protected CancellationTokenSource? _cts;
         protected readonly Utils _logger;
         protected TransactionStateEnum TransactionState = TransactionStateEnum.inactive;
@@ -43,6 +41,7 @@ namespace Simulators
         protected string SecureOperationUniquueId = string.Empty;
         protected (bool, Guid) CancelRequested;
         protected (int[]?, Guid) CancelCoomandIds;
+        private int? lastRequestId;
 
         public string ServiceName { get; protected set; }
         public int Port { get; protected set; }
@@ -91,6 +90,11 @@ namespace Simulators
         public event Action? OnClientDisconnected;
 
         /// <summary>
+        /// Event triggered when a device status has changed.
+        /// </summary>
+        public Action<string>? OnStatusChange;
+
+        /// <summary>
         /// Constructs a new BaseSimulator with the specified URL, device name, and service name.
         /// </summary>
         /// <param name="url">The base URL for the simulator.</param>
@@ -128,6 +132,7 @@ namespace Simulators
 
             RegisterCommonCommandHandlers();
             RegisterDeviceCommandHandlers();
+            _= RefreshConfig();
         }
 
         /// <summary>
@@ -158,7 +163,7 @@ namespace Simulators
                 _workerCts = new CancellationTokenSource();
 
                 // start server
-                _wsServer.Start();
+                _wsServer?.Start();
 
                 _logger.LogInfo($"Service {ServiceName} listening on: {_url}");
 
@@ -243,7 +248,7 @@ namespace Simulators
         }
 
 
-        protected async Task StatusChange()
+        protected async Task StatusChanged()
         {
             var common = new
             {
@@ -265,7 +270,7 @@ namespace Simulators
             if (devicePart != null)
                 payload[name] = devicePart;
 
-            var resp = new Xfs4Message(MessageType.Event, "Common.Capabilities", 0, payload, status: "success");
+            var resp = new Xfs4Message(MessageType.Event, "Common.Capabilities", 0, payload);
             await BroadcastMessageAsync(resp, CancellationToken.None);
         }
 
@@ -400,16 +405,16 @@ namespace Simulators
                     }
                     catch (JsonException jex)
                     {
-                        _logger.LogWarning($"JSON parse error from {args.Client}: {jex.Message}");
+                        _logger.LogError($"JSON parse error from {args.Client}: {jex.Message}");
                         // send a completion with invalidRequest error shape (best-effort)
-                        var errMsg = new Xfs4Message(MessageType.Completion, "Invalid.Json", req.Header.RequestId, payload: new { error = "Invalid JSON" }, status: "invalidData");
+                        var errMsg = new Xfs4Message(MessageType.Acknowledge, req?.Header?.Name, req?.Header?.RequestId, payload: new { error = "Invalid JSON" }, status: CommandStatusEnum.invalidMessage);
                         await SafeSendToClientAsync(args.Client.Guid, errMsg, CancellationToken.None).ConfigureAwait(false);
                         return;
                     }
 
                     if (req == null)
                     {
-                        _logger.LogWarning($"Deserialized message is null from {args.Client}.");
+                        _logger.LogError($"Deserialized message is null from {args.Client}.");
                         return;
                     }
 
@@ -423,8 +428,17 @@ namespace Simulators
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError($"MessageReceived hook threw: {ex.Message}");
+                        _logger.LogWarning($"MessageReceived hook threw: {ex.Message}");
                     }
+
+                    if (req?.Header.RequestId <= lastRequestId)
+                    {
+                        var errMsg = new Xfs4Message(MessageType.Acknowledge, req?.Header?.Name, req?.Header?.RequestId, payload: new { error = "Invalid JSON" }, status: CommandStatusEnum.invalidRequestID);
+                        await SafeSendToClientAsync(args.Client.Guid, errMsg, CancellationToken.None).ConfigureAwait(false);
+                        return;
+                    }
+                    else
+                        lastRequestId = req?.Header.RequestId;
 
                     // send ack (best-effort)
                     try
@@ -435,6 +449,7 @@ namespace Simulators
                     catch (Exception ex)
                     {
                         _logger.LogWarning($"Failed to send ack to {args.Client}: {ex.Message}");
+                        return;
                     }
 
                     // prepare a cancellation token source that is tied to the client's lifetime
@@ -453,7 +468,7 @@ namespace Simulators
                         return;
                     }
 
-                     await _queue.Writer.WriteAsync((req, args.Client.Guid, perCmdCts.Token));
+                    await _queue.Writer.WriteAsync((req, args.Client.Guid, perCmdCts.Token));
                     // note: WriteAsync completes once the item is accepted without blocking the Watson thread beyond this point.
                 }
                 catch (Exception ex)
@@ -479,6 +494,10 @@ namespace Simulators
 
         public virtual void RegisterDeviceCommandHandlers()
         {
+        }
+
+        public async virtual Task RefreshConfig()
+        {            
         }
 
         protected virtual void DeviceGetInterfaceInfo(Guid clientId, Xfs4Message message, CancellationToken token)
@@ -518,7 +537,7 @@ namespace Simulators
                             {
                                 _logger.LogError($"No handler found for {msg.Header.Name} - {ServiceName}");
                                 var err = new Xfs4Message(MessageType.Completion, msg.Header.Name, msg.Header.RequestId,
-                                    payload: new { error = "Unsupported command" }, status: "invalidCommand");
+                                    payload: new { error = "Unsupported command" }, status: CommandStatusEnum.invalidMessage);
                                 await SafeSendToClientAsync(clientId, err, token).ConfigureAwait(false);
                                 continue;
                             }
@@ -534,12 +553,13 @@ namespace Simulators
                                 catch (OperationCanceledException)
                                 {
                                     _logger.LogInfo($"Handler for {msg.Header.Name} was canceled for client {clientId}");
+
                                 }
                                 catch (Exception ex)
                                 {
                                     _logger.LogError($"Exception thrown in handler for {msg.Header.Name}: {ex.Message}");
                                     var err = new Xfs4Message(MessageType.Completion, msg.Header.Name, msg.Header.RequestId,
-                                        payload: new { error = ex.Message }, status: "internalError");
+                                        payload: new { error = ex.Message }, status: CommandStatusEnum.invalidMessage);
                                     try { await SafeSendToClientAsync(clientId, err, CancellationToken.None).ConfigureAwait(false); } catch { }
                                 }
                                 finally
@@ -557,7 +577,7 @@ namespace Simulators
                         {
                             _logger.LogError($"exception thrown for {msg.Header.Name}: {ex.Message}");
                             var err = new Xfs4Message(MessageType.Completion, msg.Header.Name, msg.Header.RequestId,
-                                payload: new { error = ex.Message }, status: "internalError");
+                                payload: new { error = ex.Message }, status: CommandStatusEnum.invalidMessage);
                             try { await SafeSendToClientAsync(clientId, err, CancellationToken.None).ConfigureAwait(false); } catch { }
                         }
                     }
@@ -591,7 +611,7 @@ namespace Simulators
         /// </summary>
         private async Task SafeSendToClientAsync(Guid clientId, Xfs4Message message, CancellationToken token)
         {
-            if (_wsServer == null) throw new InvalidOperationException("Server not started.");
+            if (_wsServer == null) throw new InvalidOperationException($"{ServiceName} Server not started.");
 
             // throttle concurrent sends
             await _sendSemaphore.WaitAsync(token).ConfigureAwait(false);
@@ -606,9 +626,9 @@ namespace Simulators
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"Send to client {clientId} failed: {ex.Message}. Removing client and cancelling operations.");
+                    _logger.LogWarning($"{ServiceName} Send to client {clientId} failed: {ex.Message}. Removing client and cancelling operations.");
                     // best-effort cleanup for a dead/unresponsive client
-                    
+
                     //lock (_allClients) { _allClients.RemoveAll(g => g == clientId); }
                     if (_activeCommandTokens.TryRemove(clientId, out var cts))
                     {
@@ -661,7 +681,7 @@ namespace Simulators
             if (devicePart != null)
                 payload[name] = devicePart;
 
-            var resp = new Xfs4Message(MessageType.Completion, "Common.Status", msg.Header.RequestId, payload, status: "success");
+            var resp = new Xfs4Message(MessageType.Completion, "Common.Status", msg.Header.RequestId, payload);
             await SafeSendToClientAsync(clientId, resp, _cts!.Token).ConfigureAwait(false);
         }
 
@@ -713,7 +733,7 @@ namespace Simulators
             if (devicePart != null)
                 payload[name] = devicePart;
 
-            var resp = new Xfs4Message(MessageType.Completion, "Common.Capabilities", msg.Header.RequestId, payload, status: "success");
+            var resp = new Xfs4Message(MessageType.Completion, "Common.Capabilities", msg.Header.RequestId, payload);
             await SafeSendToClientAsync(clientId, resp, _cts!.Token).ConfigureAwait(false);
         }
 
@@ -846,8 +866,7 @@ namespace Simulators
                         MessageType.Completion,
                         "Common.Cancel",
                         msg.Header.RequestId,
-                        payload: new { message = "Command cancelled successfully." },
-                        status: "success"
+                        payload: new { message = "Command cancelled successfully." }
                     );
 
                     await SafeSendToClientAsync(clientId, completion, CancellationToken.None);
@@ -860,8 +879,7 @@ namespace Simulators
                         MessageType.Completion,
                         "Common.Cancel",
                         msg.Header.RequestId,
-                        payload: new { message = "No active command to cancel." },
-                        status: "success"
+                        payload: new { message = "No active command to cancel." }
                     );
 
                     await SafeSendToClientAsync(clientId, completion, CancellationToken.None);
@@ -877,7 +895,7 @@ namespace Simulators
                     "Common.Cancel",
                     msg.Header.RequestId,
                     payload: new { error = ex.Message },
-                    status: "internalError"
+                    status: CommandStatusEnum.invalidMessage
                 );
 
                 await SafeSendToClientAsync(clientId, err, CancellationToken.None);
