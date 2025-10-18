@@ -1,8 +1,11 @@
 ﻿using GlobalShared;
 using Simulators.Xfs4IoT;
+using System;
 using System.Collections.Concurrent;
+using System.Security.Policy;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Channels;
 using WatsonWebsocket;
 
@@ -19,7 +22,7 @@ namespace Simulators
     /// Dispose the simulator to ensure all resources are released and background tasks are stopped.</remarks>
     public class BaseSimulator : IDisposable
     {
-        private readonly string _url;
+        private string _url;
         private WatsonWsServer? _wsServer;
         private CancellationTokenSource? _workerCts;
         private readonly ConcurrentDictionary<string, Func<Guid, Xfs4Message, CancellationToken, Task>> _CommandHandlers = new();
@@ -33,7 +36,7 @@ namespace Simulators
 
         protected readonly string ConfigFolder = @"C:\ProgramData\NextGen\Simulators\Device Configurations";
         protected CancellationTokenSource? _cts;
-        protected readonly Utils _logger;
+        protected Utils _logger;
         protected TransactionStateEnum TransactionState = TransactionStateEnum.inactive;
         protected string TransactionId = string.Empty;
         protected string CommandNonce = string.Empty;
@@ -43,36 +46,38 @@ namespace Simulators
         protected (int[]?, Guid) CancelCoomandIds;
         private int? lastRequestId;
 
-        public string ServiceName { get; protected set; }
-        public int Port { get; protected set; }
-        public string HostName { get; protected set; }
-        public string DeviceName { get; protected set; }
-        public string Url => _url;
+        [JsonInclude] public string ServiceName { get; protected set; }
+        [JsonInclude] public int Port { get; protected set; }
+        [JsonInclude] public string HostName { get; protected set; }
+        [JsonInclude] public string DeviceName { get; protected set; }
+        [JsonInclude] public string Url { get; protected set; }
 
         // Shared device state / properties
-        public bool IsOnline { get; protected set; } = false;
-        public DeviceStatusEnum? DeviceStatus { get; protected set; } = DeviceStatusEnum.noDevice;
-        public DevicePositionStatusEnum? DevicePositionStatus { get; private set; } = null;
-        public int PowerSaveRecoveryTime { get; private set; } = 10;
-        public AntiFraudModuleStatusEnum? AntiFraudModuleStatus { get; private set; } = null;
-        public ExchangeStatusEnum? ExchangeStatus { get; private set; } = null;
-        public EndToEndSecurityStatusEnum? EndToEndSecurityStatus { get; private set; } = null;
-        public int RemainingCapacityStatus { get; private set; } = 0;
-        public DateTime LastHeartbeat { get; protected set; } = DateTime.MinValue;
+        [JsonInclude] public bool IsOnline { get; protected set; } = false;
+        [JsonInclude] public DeviceStatusEnum? DeviceStatus { get; protected set; } = DeviceStatusEnum.noDevice;
+        [JsonInclude] public DevicePositionStatusEnum? DevicePositionStatus { get; protected set; } = null;
+        [JsonInclude] public int PowerSaveRecoveryTime { get; protected set; } = 10;
+        [JsonInclude] public AntiFraudModuleStatusEnum? AntiFraudModuleStatus { get; protected set; } = null;
+        [JsonInclude] public ExchangeStatusEnum? ExchangeStatus { get; protected set; } = null;
+        [JsonInclude] public EndToEndSecurityStatusEnum? EndToEndSecurityStatus { get; protected set; } = null;
+        [JsonInclude] public int RemainingCapacityStatus { get; protected set; } = 0;
+        [JsonInclude] public DateTime LastHeartbeat { get; protected set; } = DateTime.MinValue;
 
         // Capabilities
         protected Dictionary<string, object> CommonCapabilities { get; } = new Dictionary<string, object>();
-        public string ServiceVersion { get; private set; } = "1.0.0";
-        public string ModelName { get; private set; }
-        public bool PowerSaveControlCp { get; private set; } = false;
-        public bool HasAntiFraudModuleCp { get; private set; } = false;
-        public RequiredEndToEndSecurityEnum? RequiredEndToEndSecurityCp { get; private set; } = RequiredEndToEndSecurityEnum.always;
-        public bool HardwareSecurityElementCp { get; private set; } = false;
-        public ResponseSecurityEnabledEnum? ResponseSecurityEnabledCp { get; private set; } = ResponseSecurityEnabledEnum.always;
+        [JsonInclude] public string ServiceVersion { get; protected set; } = "1.0.0";
+        [JsonInclude] public string ModelName { get; protected set; }
+        [JsonInclude] public bool PowerSaveControlCp { get; protected set; } = false;
+        [JsonInclude] public bool HasAntiFraudModuleCp { get; protected set; } = false;
+        [JsonInclude] public RequiredEndToEndSecurityEnum? RequiredEndToEndSecurityCp { get; protected set; } = RequiredEndToEndSecurityEnum.always;
+        [JsonInclude] public bool HardwareSecurityElementCp { get; protected set; } = false;
+        [JsonInclude] public ResponseSecurityEnabledEnum? ResponseSecurityEnabledCp { get; protected set; } = ResponseSecurityEnabledEnum.always;
         /// <summary>
         /// Gets or sets the timeout period, in seconds, for command nonces before they expire.
         /// </summary>
         public int CommandNonceTimeout { get; set; } = 3600;
+
+        public bool SecureConnection { get; set; }
 
         /// <summary>
         /// Event triggered when a message is received from a client.
@@ -94,6 +99,17 @@ namespace Simulators
         /// </summary>
         public Action<string>? OnStatusChange;
 
+        public BaseSimulator()
+        {
+            var options = new BoundedChannelOptions(1000)
+            {
+                SingleReader = true,
+                SingleWriter = false,
+                FullMode = BoundedChannelFullMode.Wait
+            };
+            _queue = Channel.CreateBounded<(Xfs4Message msg, Guid clientId, CancellationToken tkn)>(options);
+        }
+
         /// <summary>
         /// Constructs a new BaseSimulator with the specified URL, device name, and service name.
         /// </summary>
@@ -102,7 +118,11 @@ namespace Simulators
         /// <param name="serviceName">The name of the service being simulated.</param>
         public BaseSimulator(string url, string deviceName, string serviceName, bool secureConnextion = false)
         {
-            _url = $"{url}/xfs4iot/v1.0/{serviceName}/";
+            DeviceName = deviceName;
+            ServiceName = serviceName;
+            Url = url;
+            SecureConnection = secureConnextion;
+            _url = $"{Url}/xfs4iot/v1.0/{serviceName}/";
             _logger = new Utils($"{serviceName}"); // use provided service name for logger
             // create a bounded channel with some reasonable capacity to provide backpressure under burst conditions.
             // tune capacity as needed (1000 is a typical starting point for device simulators).
@@ -113,8 +133,6 @@ namespace Simulators
                 FullMode = BoundedChannelFullMode.Wait
             };
             _queue = Channel.CreateBounded<(Xfs4Message msg, Guid clientId, CancellationToken tkn)>(options);
-            DeviceName = deviceName;
-            ServiceName = serviceName;
             ModelName = $"NextGen{DeviceName}SimulatorModel";
             HostName = new Uri(url).Host;
 
@@ -132,7 +150,7 @@ namespace Simulators
 
             RegisterCommonCommandHandlers();
             RegisterDeviceCommandHandlers();
-            _= RefreshConfig();
+            //RefreshConfig().GetAwaiter().GetResult();
         }
 
         /// <summary>
@@ -159,6 +177,26 @@ namespace Simulators
         {
             try
             {
+                if (_wsServer == null)
+                {
+                    RefreshConfig().GetAwaiter().GetResult();
+
+                    _url = $"ws://{HostName}:{Port}/xfs4iot/v1.0/{ServiceName}/";
+                    _logger = new Utils($"{ServiceName}"); // use provided service name for logger
+                    // parse host & port from the URL
+                    var uri = new Uri(_url);
+
+                    // Initialize Watson server
+                    _wsServer = new WatsonWsServer(uri.Host, Port, SecureConnection);
+
+                    // attach handlers
+                    _wsServer.ClientConnected += WsServer_ClientConnected;
+                    _wsServer.ClientDisconnected += WsServer_ClientDisconnected;
+                    _wsServer.MessageReceived += WsServer_MessageReceived;
+
+                    RegisterCommonCommandHandlers();
+                    RegisterDeviceCommandHandlers();
+                }
                 _cts = new CancellationTokenSource();
                 _workerCts = new CancellationTokenSource();
 
@@ -379,18 +417,17 @@ namespace Simulators
             {
                 try
                 {
-
                     // decode message bytes -> string
                     string message;
                     try
                     {
                         message = Encoding.UTF8.GetString(args.Data);
-                        _logger.LogInfo($"Message received: \n{message}");
+                        _logger.LogInfo($"Row message received: \n{message}");
                     }
                     catch (Exception ex)
                     {
                         _logger.LogError($"Failed to decode message from {args.Client}: {ex.Message}");
-                        return;
+                        throw;
                     }
 
                     // Try to deserialize safely. If message is malformed, respond with a completion error
@@ -399,7 +436,7 @@ namespace Simulators
                     {
                         req = JsonSerializer.Deserialize<Xfs4Message>(message, new JsonSerializerOptions
                         {
-                            PropertyNameCaseInsensitive = true,
+                            //PropertyNameCaseInsensitive = true,
                             AllowTrailingCommas = true
                         });
                     }
@@ -415,6 +452,22 @@ namespace Simulators
                     if (req == null)
                     {
                         _logger.LogError($"Deserialized message is null from {args.Client}.");
+                        var errMsg = new Xfs4Message(MessageType.Acknowledge, req?.Header?.Name, req?.Header?.RequestId, payload: new { error = "Invalid JSON" }, status: CommandStatusEnum.invalidMessage);
+                        await SafeSendToClientAsync(args.Client.Guid, errMsg, CancellationToken.None).ConfigureAwait(false);
+                        return;
+                    }
+                    else if (req.Header?.Type != MessageType.Command)
+                    {
+                        _logger.LogError($"Deserialized message has non Command request {args.Client}.");
+                        var errMsg = new Xfs4Message(MessageType.Acknowledge, req?.Header?.Name, req?.Header?.RequestId, payload: new { error = "Request type is null or not a Command" }, status: CommandStatusEnum.invalidMessage);
+                        await SafeSendToClientAsync(args.Client.Guid, errMsg, CancellationToken.None).ConfigureAwait(false);
+                        return;
+                    }
+                    else if (string.IsNullOrWhiteSpace(req.Header.Name))
+                    {
+                        _logger.LogError($"Deserialized message has no command name from {args.Client}.");
+                        var errMsg = new Xfs4Message(MessageType.Acknowledge, req?.Header?.Name, req?.Header?.RequestId, payload: new { error = "No command name!" }, status: CommandStatusEnum.invalidMessage);
+                        await SafeSendToClientAsync(args.Client.Guid, errMsg, CancellationToken.None).ConfigureAwait(false);
                         return;
                     }
 
@@ -433,14 +486,14 @@ namespace Simulators
 
                     if (req?.Header.RequestId <= lastRequestId)
                     {
-                        var errMsg = new Xfs4Message(MessageType.Acknowledge, req?.Header?.Name, req?.Header?.RequestId, payload: new { error = "Invalid JSON" }, status: CommandStatusEnum.invalidRequestID);
+                        var errMsg = new Xfs4Message(MessageType.Acknowledge, req?.Header?.Name, req?.Header?.RequestId, payload: new { error = "Invalid Request id" }, status: CommandStatusEnum.invalidRequestID);
                         await SafeSendToClientAsync(args.Client.Guid, errMsg, CancellationToken.None).ConfigureAwait(false);
                         return;
                     }
                     else
                         lastRequestId = req?.Header.RequestId;
 
-                    // send ack (best-effort)
+                    // send ack
                     try
                     {
                         var ack = new Xfs4Message(MessageType.Acknowledge, req.Header.Name, req.Header.RequestId);
@@ -497,7 +550,7 @@ namespace Simulators
         }
 
         public async virtual Task RefreshConfig()
-        {            
+        {
         }
 
         protected virtual void DeviceGetInterfaceInfo(Guid clientId, Xfs4Message message, CancellationToken token)
@@ -516,6 +569,7 @@ namespace Simulators
         private async Task WorkerLoopAsync(CancellationToken token)
         {
             var reader = _queue.Reader;
+            _logger.LogInfo($"{ServiceName}-Worker started, waiting for messages...");
 
             while (!token.IsCancellationRequested)
             {
@@ -593,7 +647,6 @@ namespace Simulators
                     await Task.Delay(100, CancellationToken.None).ConfigureAwait(false);
                 }
             }
-
             _logger.LogInfo($"{ServiceName}-Worker stopped.");
         }
 
@@ -845,31 +898,31 @@ namespace Simulators
                 if (_activeCommandTokens.TryGetValue(clientId, out var cts))
                 {
                     _logger.LogInfo($"Cancel requested by client {clientId} for ongoing command.");
-
+                    Xfs4Message completion = null;
                     try
                     {
+                        // Send completion acknowledgment back to client
+                        completion = new Xfs4Message
+                        (
+                            MessageType.Completion,
+                            "Common.Cancel",
+                            msg.Header.RequestId,
+                            payload: new { }
+                        );
+
+                        await SafeSendToClientAsync(clientId, completion, CancellationToken.None);
                         cts.Cancel();
                         cts.Dispose();
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning($"Error while cancelling client {clientId}: {ex.Message}");
+                        _logger.LogWarning($"Error while cancelling client {clientId}: {ex.Message}");                       
+                        return;
                     }
 
                     // Replace with a fresh CTS for subsequent commands
                     var newCts = new CancellationTokenSource();
                     _activeCommandTokens[clientId] = newCts;
-
-                    // Send completion acknowledgment back to client
-                    var completion = new Xfs4Message
-                    (
-                        MessageType.Completion,
-                        "Common.Cancel",
-                        msg.Header.RequestId,
-                        payload: new { message = "Command cancelled successfully." }
-                    );
-
-                    await SafeSendToClientAsync(clientId, completion, CancellationToken.None);
                 }
                 else
                 {
@@ -881,7 +934,6 @@ namespace Simulators
                         msg.Header.RequestId,
                         payload: new { message = "No active command to cancel." }
                     );
-
                     await SafeSendToClientAsync(clientId, completion, CancellationToken.None);
                 }
             }
@@ -897,7 +949,6 @@ namespace Simulators
                     payload: new { error = ex.Message },
                     status: CommandStatusEnum.invalidMessage
                 );
-
                 await SafeSendToClientAsync(clientId, err, CancellationToken.None);
             }
         }

@@ -1,5 +1,6 @@
 using GlobalShared;
 using Simulators.CardReader;
+using Simulators.Config;
 using Simulators.Xfs4IoT;
 using System.Data;
 using System.Text.Json;
@@ -12,10 +13,13 @@ namespace Simulators
         public SimulatorMainForm()
         {
             InitializeComponent();
+            //LoadDevicesFromConfigs();
         }
 
+        List<BaseSimulator> DevicesList = new();
+
         //Devices:
-        CardReaderSimulator cardReaderSimulator = new CardReaderSimulator("ws://localhost:1234", "CardReader", "CardReader1");
+        CardReaderSimulator cardReaderSimulator = new();// CardReaderSimulator("ws://localhost:1234", "CardReader", "CardReader1");
         ServicePublisher publisher = new ServicePublisher(
             vendorName: "ACME ATM Hardware GmbH",
             machineName: "localhost",
@@ -23,10 +27,30 @@ namespace Simulators
             useTls: false
         );
 
+        public void LoadDevicesFromConfigs()
+        {
+            var jsonOptions = new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            };
+
+            foreach (var file in Directory.EnumerateFiles(@"C:\ProgramData\NextGen\Simulators\Device Configurations", "*.json"))
+            {
+                var json = File.ReadAllText(file);
+                var obj = JsonSerializer.Deserialize<CardReaderSimulator>(json, jsonOptions);
+                if (obj != null)
+                    DevicesList.Add(obj);
+            }
+        }
+
         private void SimulatorMainForm_Load(object sender, EventArgs e)
         {
             try
             {
+                //ConfigForm configForm = new ConfigForm();
+                //configForm.Show();
+                DevicesList.Add(cardReaderSimulator);
+
                 cardReaderSimulator.Start();
                 cardReaderSimulator.OnStatusChange += CardReaderSimulator_StatusChange;
 
@@ -53,7 +77,7 @@ namespace Simulators
 
         public string ToJson(bool indented = true)
         {
-            var opts = new JsonSerializerOptions { WriteIndented = indented, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
+            var opts = new JsonSerializerOptions { WriteIndented = indented};
             opts.Converters.Add(new JsonStringEnumConverter());
             return JsonSerializer.Serialize(cardReaderSimulator, opts);
         }

@@ -1,5 +1,8 @@
 ﻿using Simulators.Xfs4IoT;
+using System.Formats.Tar;
 using System.Net.WebSockets;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Simulators.CardReader
 {
@@ -14,54 +17,61 @@ namespace Simulators.CardReader
         public const string MediaRemovedEvent = "CardReader.MediaRemovedEvent";
         public const string CardActionEvent = "CardReader.CardActionEvent";
 
+        public CardReaderSimulator()
+        {
+
+        }
+
         public CardReaderSimulator(string url, string deviceName, string serviceName) : base(url, "CardReder", serviceName)
         {
+            MediaStatus = MediaStatusEnum.unknown;
+            DeviceStatus = DeviceStatusEnum.noDevice;
         }
 
         // Device status properties (get only, set private)
-        public MediaStatusEnum MediaStatus { get; private set; } = MediaStatusEnum.notPresent;
-        public SecurityStatusEnum? SecurityStatus { get; private set; } = SecurityStatusEnum.notReady;
-        public ChipPowerStatusEnum? ChipPowerStatus { get; private set; } = ChipPowerStatusEnum.noCard;
-        public ChipModuleStatusEnum? ChipModuleStatus { get; private set; } = ChipModuleStatusEnum.ok;
-        public MagWriteModuleStatusEnum? MagWriteModuleStatus { get; private set; } = MagWriteModuleStatusEnum.unknown;
-        public FrontImageModuleStatusEnum? FrontImageModuleStatus { get; private set; } = FrontImageModuleStatusEnum.unknown;
-        public string BackImageModuleStatus { get; private set; } = "unknown";
+        [JsonInclude] public MediaStatusEnum MediaStatus { get; private set; } = MediaStatusEnum.notPresent;
+        [JsonInclude] public SecurityStatusEnum? SecurityStatus { get; private set; } = SecurityStatusEnum.notReady;
+        [JsonInclude] public ChipPowerStatusEnum? ChipPowerStatus { get; private set; } = ChipPowerStatusEnum.noCard;
+        [JsonInclude] public ChipModuleStatusEnum? ChipModuleStatus { get; private set; } = ChipModuleStatusEnum.ok;
+        [JsonInclude] public MagWriteModuleStatusEnum? MagWriteModuleStatus { get; private set; } = MagWriteModuleStatusEnum.unknown;
+        [JsonInclude] public FrontImageModuleStatusEnum? FrontImageModuleStatus { get; private set; } = FrontImageModuleStatusEnum.unknown;
+        [JsonInclude] public string BackImageModuleStatus { get; private set; } = "unknown";
 
 
         // Add these properties to CardReaderSimulator (set protected, get public)
-        public bool Track1Cp { get; protected set; } = false;
-        public bool Track2Cp { get; protected set; } = false;
-        public bool Track3Cp { get; protected set; } = false;
-        public bool WatermarkCp { get; protected set; } = false;
-        public bool FrontImageCp { get; protected set; } = false;
-        public bool BackImageCp { get; protected set; } = false;
-        public bool Track1JISCp { get; protected set; } = false;
-        public bool Track3JISCp { get; protected set; } = false;
-        public bool DdiCp { get; protected set; } = false;
-        public bool ChipT0Cp { get; protected set; } = false;
-        public bool ChipT1Cp { get; protected set; } = false;
-        public bool ChipProtocolNotRequiredCp { get; protected set; } = false;
-        public bool ChipTypeAPart3Cp { get; protected set; } = false;
-        public bool ChipTypeAPart4Cp { get; protected set; } = false;
-        public bool ChipTypeBCp { get; protected set; } = false;
-        public bool ChipTypeNFCCp { get; protected set; } = false;
-        public SecurityTypeEnum? SecurityTypeCp { get; protected set; } = SecurityTypeEnum.mm;
-        public string PowerOnOptionCp { get; protected set; } = "exit";
-        public string PowerOffOptionCp { get; protected set; } = "exit";
-        public bool FluxSensorProgrammableCp { get; protected set; } = false;
-        public bool ReadWriteAccessFromExitCp { get; protected set; } = false;
-        public bool LocoCp { get; protected set; } = false;
-        public bool HicoCp { get; protected set; } = false;
-        public bool AutoCp { get; protected set; } = false;
-        public bool ColdCp { get; protected set; } = false;
-        public bool WarmCp { get; protected set; } = false;
-        public bool OffCp { get; protected set; } = false;
-        public bool Siemens4442Cp { get; protected set; } = false;
-        public bool Gpm896Cp { get; protected set; } = false;
-        public bool ExitCp { get; protected set; } = false;
-        public bool TransportCp { get; protected set; } = false;
-        public bool CardTakenSensorCp { get; protected set; } = false;
-        public CardReaderTypeEnum? CardReaderTypeCp { get; private set; } = CardReaderTypeEnum.motor;
+        [JsonInclude] public bool Track1Cp { get; protected set; } = false;
+        [JsonInclude] public bool Track2Cp { get; protected set; } = false;
+        [JsonInclude] public bool Track3Cp { get; protected set; } = false;
+        [JsonInclude] public bool WatermarkCp { get; protected set; } = false;
+        [JsonInclude] public bool FrontImageCp { get; protected set; } = false;
+        [JsonInclude] public bool BackImageCp { get; protected set; } = false;
+        [JsonInclude] public bool Track1JISCp { get; protected set; } = false;
+        [JsonInclude] public bool Track3JISCp { get; protected set; } = false;
+        [JsonInclude] public bool DdiCp { get; protected set; } = false;
+        [JsonInclude] public bool ChipT0Cp { get; protected set; } = false;
+        [JsonInclude] public bool ChipT1Cp { get; protected set; } = false;
+        [JsonInclude] public bool ChipProtocolNotRequiredCp { get; protected set; } = false;
+        [JsonInclude] public bool ChipTypeAPart3Cp { get; protected set; } = false;
+        [JsonInclude] public bool ChipTypeAPart4Cp { get; protected set; } = false;
+        [JsonInclude] public bool ChipTypeBCp { get; protected set; } = false;
+        [JsonInclude] public bool ChipTypeNFCCp { get; protected set; } = false;
+        [JsonInclude] public SecurityTypeEnum? SecurityTypeCp { get; protected set; } = SecurityTypeEnum.mm;
+        [JsonInclude] public string PowerOnOptionCp { get; protected set; } = "exit";
+        [JsonInclude] public string PowerOffOptionCp { get; protected set; } = "exit";
+        [JsonInclude] public bool FluxSensorProgrammableCp { get; protected set; } = false;
+        [JsonInclude] public bool ReadWriteAccessFromExitCp { get; protected set; } = false;
+        [JsonInclude] public bool LocoCp { get; protected set; } = false;
+        [JsonInclude] public bool HicoCp { get; protected set; } = false;
+        [JsonInclude] public bool AutoCp { get; protected set; } = false;
+        [JsonInclude] public bool ColdCp { get; protected set; } = false;
+        [JsonInclude] public bool WarmCp { get; protected set; } = false;
+        [JsonInclude] public bool OffCp { get; protected set; } = false;
+        [JsonInclude] public bool Siemens4442Cp { get; protected set; } = false;
+        [JsonInclude] public bool Gpm896Cp { get; protected set; } = false;
+        [JsonInclude] public bool ExitCp { get; protected set; } = false;
+        [JsonInclude] public bool TransportCp { get; protected set; } = false;
+        [JsonInclude] public bool CardTakenSensorCp { get; protected set; } = false;
+        [JsonInclude] public CardReaderTypeEnum? CardReaderTypeCp { get; private set; } = CardReaderTypeEnum.motor;
 
         public List<CardData> ConfiguredCards { get; set; } = new() { new CardData() { Track1 = "test tck1", ChipData = "Chip data test", Track2 = "test trk2" } };
         // Simulated properties to control card insertion and removal
@@ -80,6 +90,78 @@ namespace Simulators.CardReader
         public override void MessageReceived(Xfs4Message req, Guid socket)
         {
 
+        }
+
+        public override async Task RefreshConfig()
+        {
+            var jsonOptions = new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true,
+                Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
+            };
+            var json = File.ReadAllText(@$"C:\ProgramData\NextGen\Simulators\Device Configurations\Cardreader.json");
+            var obj = JsonSerializer.Deserialize<CardReaderSimulator>(json, jsonOptions);
+            if (obj != null)
+            {
+                this.SecureConnection = obj.SecureConnection;
+                this.Track1Cp = obj.Track1Cp;
+                this.Track2Cp = obj.Track2Cp;
+                this.Track3Cp = obj.Track3Cp;
+                this.WatermarkCp = obj.WatermarkCp;
+                this.FrontImageCp = obj.FrontImageCp;
+                this.BackImageCp = obj.BackImageCp;
+                this.Track1JISCp = obj.Track1JISCp;
+                this.Track3JISCp = obj.Track3JISCp;
+                this.DdiCp = obj.DdiCp;
+                this.ChipT0Cp = obj.ChipT0Cp;
+                this.ChipT1Cp = obj.ChipT1Cp;
+                this.ChipProtocolNotRequiredCp = obj.ChipProtocolNotRequiredCp;
+                this.ChipTypeAPart3Cp = obj.ChipTypeAPart3Cp;
+                this.ChipTypeAPart4Cp = obj.ChipTypeAPart4Cp;
+                this.ChipTypeBCp = obj.ChipTypeBCp;
+                this.ChipTypeNFCCp = obj.ChipTypeNFCCp;
+                this.SecurityTypeCp = obj.SecurityTypeCp;
+                this.PowerOnOptionCp = obj.PowerOnOptionCp;
+                this.PowerOffOptionCp = obj.PowerOffOptionCp;
+                this.FluxSensorProgrammableCp = obj.FluxSensorProgrammableCp;
+                this.ReadWriteAccessFromExitCp = obj.ReadWriteAccessFromExitCp;
+                this.LocoCp = obj.LocoCp;
+                this.HicoCp = obj.HicoCp;
+                this.AutoCp = obj.AutoCp;
+                this.ColdCp = obj.ColdCp;
+                this.WarmCp = obj.WarmCp;
+                this.OffCp = obj.OffCp;
+                this.Siemens4442Cp = obj.Siemens4442Cp;
+                this.Gpm896Cp = obj.Gpm896Cp;
+                this.ExitCp = obj.ExitCp;
+                this.TransportCp = obj.TransportCp;
+                this.CardTakenSensorCp = obj.CardTakenSensorCp;
+                this.CardReaderTypeCp = obj.CardReaderTypeCp;
+                this.ConfiguredCards = obj.ConfiguredCards;
+                this.CurrentCardIndex = obj.CurrentCardIndex;
+                this.Port = obj.Port;
+                this.HostName = obj.HostName;
+                this.ModelName = obj.ModelName;
+                this.DeviceStatus = obj.DeviceStatus;
+                this.MediaStatus = obj.MediaStatus;
+                this.SecurityStatus = obj.SecurityStatus;
+                this.ChipPowerStatus = obj.ChipPowerStatus;
+                this.ChipModuleStatus = obj.ChipModuleStatus;
+                this.MagWriteModuleStatus = obj.MagWriteModuleStatus;
+                this.FrontImageModuleStatus = obj.FrontImageModuleStatus;
+                this.BackImageModuleStatus = obj.BackImageModuleStatus;
+                this.CardInserted = obj.CardInserted;
+                this.CardTaken = obj.CardTaken;
+                this.BreakPoint = obj.BreakPoint;
+                this.ServiceName = obj.ServiceName;
+                this.DeviceName = obj.DeviceName;
+                this.AntiFraudModuleStatus = obj.AntiFraudModuleStatus;
+                this.ExchangeStatus = obj.ExchangeStatus;
+                this.EndToEndSecurityStatus = obj.EndToEndSecurityStatus;
+                this.PowerSaveRecoveryTime = obj.PowerSaveRecoveryTime;
+
+
+            }
         }
 
         public override void RegisterDeviceCommandHandlers()
@@ -581,10 +663,27 @@ namespace Simulators.CardReader
                             }
                         };
                         await SendAsync(socket, timeoutCompletion, _cts.Token);
-                        break;
+                        return;
                     case var t when t == cancelReadTask:
                         //send cancel completion
-                        break;
+                        _logger.LogInfo("[CardReader] ReadRawData canceled.");
+                        var canceleCompletion = new Xfs4Message
+                        {
+                            Header = new Xfs4Header
+                            {
+                                Name = req.Header.Name,
+                                Type = MessageType.Completion,
+                                RequestId = req.Header.RequestId,
+                                CompletionCode = CompletionCodeEnum.canceled,
+                                ErrorDiscription = "Command canceled"
+                            },
+                            Payload = new
+                            {
+                                errorCode = "Command canceled"
+                            }
+                        };
+                        await SendAsync(socket, canceleCompletion, CancellationToken.None);
+                        return;
                 }
 
                 await readTask; // completes normally
@@ -717,22 +816,18 @@ namespace Simulators.CardReader
                     {
                         track1 = crdData.Track1 == null ? null : new
                         {
-                            status = true,
                             data = crdData.Track1
                         },
                         track2 = crdData.Track2 == null ? null : new
                         {
-                            status = true,
                             data = crdData.Track2
                         },
                         track3 = crdData.Track3 == null ? null : new
                         {
-                            status = true,
                             data = crdData.Track3
                         },
                         chip = crdData.ChipData == null ? null : new
                         {
-                            status = true,
                             data = crdData.ChipData
                         }
                     }

@@ -27,7 +27,7 @@ namespace Simulators.Xfs4IoT
 
         [JsonPropertyName("type")]
         [JsonConverter(typeof(JsonStringEnumConverter))]
-        public MessageType Type { get; set; } = MessageType.Command;
+        public MessageType? Type { get; set; } = null;
 
         [JsonPropertyName("name")]
         public string? Name { get; set; } = string.Empty;
