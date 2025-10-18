@@ -11,12 +11,30 @@
     /// or device operations.</remarks>
     public enum MediaStatusEnum
     {
-        unknown,    // -The media state cannot be determined with the device in its current state (e.g. the value of device is noDevice, powerOff, offline or hardwareError.
-        present,    // -Media is present in the device, not in the entering position and not jammed. On the latched dip device, this indicates that the card is present in the device and the card is unlatched.
-        notPresent, // -Media is not present in the device and not at the entering position.
-        jammed,     // -Media is jammed in the device; operator intervention is required.
-        entering,   // -Media is at the entry/exit slot of a motorized device.
-        latched,    // -Media is present and latched in a latched dip card unit. This means the card can be used for chip card dialog.
+        /// <summary>
+        /// The media state cannot be determined with the device in its current state (e.g. the value of device is noDevice, powerOff, offline or hardwareError.
+        /// </summary>
+        unknown,    
+        /// <summary>
+        /// Media is present in the device, not in the entering position and not jammed. On the latched dip device, this indicates that the card is present in the device and the card is unlatched.
+        /// </summary>
+        present,    // -
+        /// <summary>
+        /// Media is not present in the device and not at the entering position.
+        /// </summary>
+        notPresent, // -
+        /// <summary>
+        /// Media is jammed in the device; operator intervention is required.
+        /// </summary>
+        jammed,     // -
+        /// <summary>
+        /// Media is at the entry/exit slot of a motorized device.
+        /// </summary>
+        entering,   // -
+        /// <summary>
+        /// Media is present and latched in a latched dip card unit. This means the card can be used for chip card dialog.
+        /// </summary>
+        latched,    // -
     }
 
     /// <summary>
