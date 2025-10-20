@@ -6,7 +6,7 @@ namespace Devices
 {
     public class CardReader : Device
     {
-        protected CardReader(string name, string uri) : base(name, uri)
+        public CardReader(string name, string uri) : base(name, uri)
         {
 
         }

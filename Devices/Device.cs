@@ -5,15 +5,18 @@ using Websocket.Client;
 
 namespace Devices
 {
-    public class Device
+    public class Device : IDisposable
     {
-        private readonly WebsocketClient _client;
+        private readonly WebsocketClient _webSocketClient;
         private readonly Queue<DeviceEvent> _events = new();
         private readonly object _lock = new();
         private readonly AutoResetEvent _newEvent = new(false);
         internal WaitHandle WaitHandle => _newEvent;
+
+        protected Utils utils;
         public string Name { get; }
         public string Uri { get; }
+        public string Id { get; }
 
         /// <summary>
         /// Initializes a new instance of the <see cref="Device"/> class with the specified name and URI.
@@ -21,19 +24,35 @@ namespace Devices
         /// </summary>
         /// <param name="name">The name of the device.</param>
         /// <param name="uri">The URI endpoint for the device connection.</param>
-        protected Device(string name, string uri)
+        public Device(string name, string uri)
         {
             Name = name;
             Uri = uri;
+            Id = "";
+            utils = new(GetType().ToString());
 
-            _client = new WebsocketClient(new Uri(uri));
-            _client.MessageReceived.Subscribe(msg =>
+            _webSocketClient = new WebsocketClient(new Uri(uri));
+            _webSocketClient.MessageReceived.Subscribe(msg =>
             {
                 if (!string.IsNullOrEmpty(msg.Text))
                     OnMessage(msg.Text);
             });
+        }
 
-            _client.Start();
+        public async Task<bool> Start()
+        {
+            try
+            {
+
+                await Task.Run(() => _webSocketClient.Start());
+            }
+            catch (Exception)
+            {
+
+                return false;
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -42,7 +61,7 @@ namespace Devices
         /// <param name="cmd">The command to send.</param>
         protected void SendCommand(Command cmd)
         {
-            _client.Send(cmd.JsonString);
+            _webSocketClient.Send(cmd.JsonString);
         }
 
         /// <summary>
@@ -92,7 +111,7 @@ namespace Devices
 
             // Returns index of the first signaled device, or WaitHandle.WaitTimeout
             var result = WaitHandle.WaitAny(handles, timeoutMs);
-            if ( result == WaitHandle.WaitTimeout)
+            if (result == WaitHandle.WaitTimeout)
                 return -1; // timeout
 
             return result;
@@ -100,7 +119,7 @@ namespace Devices
 
         public void Dispose()
         {
-            _client.Dispose();
+            _webSocketClient.Dispose();
         }
     }
 }

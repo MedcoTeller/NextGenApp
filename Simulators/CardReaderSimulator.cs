@@ -81,6 +81,7 @@ namespace Simulators.CardReader
         public List<string> BreakPoint = new();
 
         public int CurrentCardIndex { get; set; } = 0;
+        public bool CanRetract { get; private set; }
 
         public override void ClientConnected()
         {
@@ -159,8 +160,6 @@ namespace Simulators.CardReader
                 this.ExchangeStatus = obj.ExchangeStatus;
                 this.EndToEndSecurityStatus = obj.EndToEndSecurityStatus;
                 this.PowerSaveRecoveryTime = obj.PowerSaveRecoveryTime;
-
-
             }
         }
 
@@ -892,22 +891,25 @@ namespace Simulators.CardReader
 
         private async Task Reset(Guid socket, Xfs4Message req, CancellationToken cmdtkn)
         {
-            //*************** Command Message *****************
+            /*/*************** Command Message *****************
             //Payload, Version 3.0
             //{ 
             //  "to": "unit1",
             //  "storageId": "exit"
             //}
-
-            //***************** Completion Message *****************
-            //Payload, Version 2.0
-            //{ 
-            //  "errorCode": "mediaJam"
-            //}
-
-            //***************** Event Messages *****************
-            //none
-            var response = new Xfs4Message
+            to:
+                exit - Move the card to the exit position. If the card is already at the exit, it may be moved to ensure it is in the correct position to be taken.
+                retain - Move the card to a retain storage unit.
+                currentPosition - Keep the card in its current position. If the card is in the transport, it may be moved in the transport to verify it is not jammed.
+                auto - The service will select the position to which the card will be moved based on device capabilities, retain storage units available and service specific configuration.
+            */
+            var to = req.GetPayloadValue<string>("to");
+            if(DeviceStatus == DeviceStatusEnum.hardwareError || DeviceStatus == DeviceStatusEnum.offline)
+            {
+                //breakpoint check to see if we will update device status to online or not:
+                DeviceStatus = DeviceStatusEnum.online;
+            }
+            var completion = new Xfs4Message
             {
                 Header = new Xfs4Header
                 {
@@ -917,10 +919,45 @@ namespace Simulators.CardReader
                 },
                 Payload = new
                 {
-                    Status = "Success"
+
                 }
             };
-            await SendAsync(socket, response, _cts.Token);
+
+            if (MediaStatus != MediaStatusEnum.present)
+            {
+                //send completion with no media error                
+                await SendAsync(socket, completion, _cts.Token);
+                return;
+            }
+
+            if (to == "retain" || to == "auto")
+            {
+                //moving the card to retract bin if supported otherwise to exit
+                if (CanRetract)
+                {
+
+                }
+            }
+            else
+            {
+
+            }
+
+            await SendAsync(socket, completion, _cts.Token);
+            return;
+            /*/***************** Completion Message *****************
+            //Payload, Version 2.0
+            //{ 
+            //  "errorCode": "mediaJam"
+            //}
+            errorCode:
+                mediaJam - The card is jammed. Operator intervention is required.
+                shutterFail - The device is unable to open and close its shutter.
+                retainBinFull - The retain bin is full; no more cards can be retained. The current card is still in the device.
+            */
+
+            //***************** Event Messages *****************
+            //none
         }
     }
 
@@ -930,5 +967,47 @@ namespace Simulators.CardReader
         public string? Track2 { get; set; } = null;
         public string? Track3 { get; set; } = null;
         public string? ChipData { get; set; } = null;
+    }
+
+    public class CardStorageUnit
+    {
+        public string? Id { get; set; }
+        public int? Capacity { get; set; }
+        public string? PositionName { get; set; }
+        public string? Status { get; set; }
+        public string? SerialNumber { get; set; }
+
+        /*
+         status:The state of the unit. This property may be null in events if the state did not change, otherwise the following values are possible:
+
+            ok - The storage unit is in a good state.
+            inoperative - The storage unit is inoperative.
+            missing - The storage unit is missing.
+            notConfigured - The storage unit has not been configured for use.
+            manipulated - The storage unit has been inserted (including removal followed by a reinsertion) when the device was not in the exchange state - see command Storage.StartExchange. This storage unit cannot be used. Only applies to services which support the exchange state.
+         */
+
+        //capabilities:
+        public string? Type { get; set; }
+        public string? HardwareSensors { get; set; }
+
+        //Configuration
+        public string? CardId { get; set; }
+        public int? Threshold { get; set; }
+
+        //Status:
+        public int? InitialCount { get; set; }
+        public int? Count { get; set; }
+        public int? RetainCount { get; set; }
+        public string? ReplenishmentStatus { get; set; }
+        /*
+         * replenishmentStatus:The state of the cards in the storage unit if it can be determined. Note that overall status of the storage unit must be considered when deciding whether the storage unit is usable and whether replenishment status is applicable. If the overall status is missing this will be null. The property may also be null in events if it did not change.
+           The following values are possible:
+                ok - The storage unit is in a good state.
+                full - The storage unit is full.
+                high - The storage unit is almost full (either sensor based or above the threshold).
+                low - The storage unit is almost empty (either sensor based or below the threshold).
+                empty - The storage unit is empty.
+         */
     }
 }

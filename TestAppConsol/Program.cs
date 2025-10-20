@@ -1,13 +1,15 @@
 ﻿using Devices;
 using GlobalShared;
-//using Simulators.CardReader;
+using System.Formats.Tar;
 
-namespace TestApp
+namespace TestAppConsol
 {
-    public class Program
+    internal class Program
     {
         static void Main(string[] args)
         {
+            Console.WriteLine("Hello, World!");
+
             var utils = new Utils("TestApp");
 
             var cr = new CardReader("CardReader", "ws://localhost:1132");

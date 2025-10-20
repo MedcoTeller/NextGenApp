@@ -15,4 +15,5 @@
   <Project Path="C:/Users/h_moh/source/repos/NextGen/UI/UI.csproj" Id="56a90132-5cbc-4daf-93a4-7de080bf495c" />
   <Project Path="C:/Users/h_moh/source/repos/NextGen/UserApp/UserApp.csproj" Id="4f4cfc69-5a63-4653-b8e3-b3854d25dea4" />
   <Project Path="Simulators/Simulators.csproj" Id="19588532-49f3-42cf-817a-b17910e6327b" />
+  <Project Path="TestAppConsol/TestAppConsol.csproj" Id="95e5775d-72a0-4634-b51d-fa6696ff2904" />
 </Solution>
