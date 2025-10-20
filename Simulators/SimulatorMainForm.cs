@@ -66,7 +66,8 @@ namespace Simulators
                 UpdateStatus();
 
                 Utils utils = new Utils("SimulatorForm");
-                utils.LogInfo(ToJson());
+                //utils.LogInfo(ToJson());
+                File.WriteAllText("simulator_state.json", ToJson());
             }
             catch (Exception ex)
             {
