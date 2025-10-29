@@ -19,7 +19,7 @@ namespace Simulators
         List<BaseSimulator> DevicesList = new();
 
         //Devices:
-        CardReaderSimulator cardReaderSimulator = new();// CardReaderSimulator("ws://localhost:1234", "CardReader", "CardReader1");
+        CardReaderSimulator cardReaderSimulator = new CardReaderSimulator("ws://localhost:1234", "CardReader", "CardReader1");
         ServicePublisher publisher = new ServicePublisher(
             vendorName: "ACME ATM Hardware GmbH",
             machineName: "localhost",
@@ -54,12 +54,6 @@ namespace Simulators
                 cardReaderSimulator.Start();
                 cardReaderSimulator.OnStatusChange += CardReaderSimulator_StatusChange;
 
-                var publisher = new ServicePublisher(
-                    vendorName: "ACME ATM Hardware GmbH",
-                    machineName: "localhost",
-                    services: new[] { "cardreader1", "cashdispenser1" },
-                    useTls: false
-                );
                 publisher.AddServiceUri(cardReaderSimulator.Url);
                 _ = publisher.StartAsync();
 

@@ -1,11 +1,11 @@
 ﻿
-namespace Devices.Commands
+namespace Devices
 {
     public class Command : Message
     {
-        public Command(string name, int timeot=0) : base(MessageType.Command, name)
+        public Command(string name, int? timeout=null) : base(MessageType.Command, name)
         {
-            Header.Timeout = timeot;
+            Header.Timeout = timeout;
         }
     }
 

@@ -50,7 +50,7 @@ namespace Simulators
         [JsonInclude] public int Port { get; protected set; }
         [JsonInclude] public string HostName { get; protected set; }
         [JsonInclude] public string DeviceName { get; protected set; }
-        [JsonInclude] public string Url { get; protected set; }
+        [JsonInclude] public string Url => _url;
 
         // Shared device state / properties
         [JsonInclude] public bool IsOnline { get; protected set; } = false;
@@ -120,9 +120,9 @@ namespace Simulators
         {
             DeviceName = deviceName;
             ServiceName = serviceName;
-            Url = url;
+            //Url = url;
             SecureConnection = secureConnextion;
-            _url = $"{Url}/xfs4iot/v1.0/{serviceName}/";
+            _url = $"{url}/xfs4iot/v1.0/{serviceName}/";
             _logger = new Utils($"{serviceName}"); // use provided service name for logger
             // create a bounded channel with some reasonable capacity to provide backpressure under burst conditions.
             // tune capacity as needed (1000 is a typical starting point for device simulators).

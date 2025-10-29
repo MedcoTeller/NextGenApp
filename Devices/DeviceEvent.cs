@@ -8,6 +8,11 @@ namespace Devices.Events
 
         }
 
+        public DeviceEvent()
+        {
+            Header.Type = MessageType.Event;
+        }
+
         public string Data { get; internal set; }
         public DateTime Timestamp { get; internal set; }
     }
