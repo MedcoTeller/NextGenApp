@@ -10,7 +10,7 @@ namespace TestApp
         {
             var utils = new Utils("TestApp");
 
-            var cr = new CardReader("CardReader", "ws://localhost:1132");
+            var cr = new CardReader("CardReader","CardReader", "ws://localhost:1132");
             //CardReaderSimulator cr = new();
             Console.ReadLine();
         }

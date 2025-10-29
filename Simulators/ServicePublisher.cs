@@ -9,7 +9,7 @@ namespace Simulators.Xfs4IoT
 {
     public class ServicePublisher
     {
-        private readonly Utils _logger;
+        private readonly Utils utils;
         private readonly WatsonWsServer _server;
         private readonly List<string> _serviceUris = new();
         private readonly bool _useTls;
@@ -23,12 +23,13 @@ namespace Simulators.Xfs4IoT
             VendorName = vendorName;
             MachineName = machineName;
             _useTls = useTls;
-            _logger = new Utils(nameof(ServicePublisher));
+            utils = new Utils(nameof(ServicePublisher));
             _port = FindAvailablePort(useTls);
 
             // Initialize Watson WebSocket server
             var url = new Uri($"{(_useTls ? "wss" : "ws")}://{machineName}:{_port}/xfs4iot/v1.0");
             string host = url.Host;
+            utils.LogInfo($"Initializing ServicePublisher at {url} ({(_useTls ? "secure" : "insecure")})");
             _server = new WatsonWsServer(host, _port, _useTls);
             _server.ClientConnected += OnClientConnected;
             _server.ClientDisconnected += OnClientDisconnected;
@@ -38,29 +39,29 @@ namespace Simulators.Xfs4IoT
         public async Task StartAsync()
         {
             _ = _server.StartAsync();
-            _logger.LogInfo($"ServicePublisher started on port {_port} ({(_useTls ? "secure" : "insecure")})");
+            utils.LogInfo($"ServicePublisher started on port {_port} ({(_useTls ? "secure" : "insecure")})");
         }
 
         public async Task StopAsync()
         {
             _server.Stop();
-            _logger.LogInfo("ServicePublisher stopped.");
+            utils.LogInfo("ServicePublisher stopped.");
         }
 
         private void OnClientConnected(object? sender, ConnectionEventArgs args)
         {
-            _logger.LogInfo($"Client connected: {args.Client}");
+            utils.LogInfo($"Client connected: {args.Client}");
         }
 
         private void OnClientDisconnected(object? sender, DisconnectionEventArgs args)
         {
-            _logger.LogInfo($"Client disconnected: {args.Client}");
+            utils.LogInfo($"Client disconnected: {args.Client}");
         }
 
         private async void OnMessageReceived(object? sender, MessageReceivedEventArgs args)
         {
             string json = Encoding.UTF8.GetString(args.Data);
-            _logger.LogDebug($"Received message from {args.Client}: \nJson: {json}");
+            utils.LogDebug($"Received message from {args.Client}: \nJson: {json}");
 
             try
             {
@@ -69,14 +70,14 @@ namespace Simulators.Xfs4IoT
                     msg.Header.Name == "ServicePublisher.GetServices")
                 {
                     var ack = new Xfs4Message(MessageType.Acknowledge, msg.Header.Name, msg.Header.RequestId);
-                    _logger.LogDebug($"Received message from {args.Client}: \nJson: {ack}");
+                    utils.LogDebug($"Received message from {args.Client}: \nJson: {ack}");
                     await _server.SendAsync(args.Client.Guid, ack.ToJson()); ;
                     await SendGetServicesResponseAsync(args.Client.Guid, msg.Header.RequestId);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogInfo($"Error handling message: {ex.Message}");
+                utils.LogInfo($"Error handling message: {ex.Message}");
             }
         }
 
@@ -103,7 +104,7 @@ namespace Simulators.Xfs4IoT
             string json = completion.ToJson();
             await _server.SendAsync(clientId, json);
 
-            _logger.LogInfo($"Sent ServicePublisher.GetServices \ncompletion: {completion} \nto: {clientId}");
+            utils.LogInfo($"Sent ServicePublisher.GetServices \ncompletion: {completion} \nto: {clientId}");
         }
 
         private static int FindAvailablePort(bool useTls)

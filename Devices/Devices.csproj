@@ -12,6 +12,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="WatsonWebsocket" Version="4.1.6" />
+  </ItemGroup>
+  
+  <ItemGroup>
     <ProjectReference Include="..\GlobalShared\GlobalShared.csproj" />
   </ItemGroup>
 
