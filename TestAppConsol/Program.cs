@@ -1,20 +1,21 @@
 ﻿using Devices;
 using GlobalShared;
+using System.Threading.Tasks;
 
 namespace TestAppConsol
 {
     internal class Program
     {
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
             Console.WriteLine("Hello, World!");
 
             //var utils = new Utils("TestApp");
-            var disc = new ServiceDiscovery();
-            disc.GetPublishers();
-            disc.GetServices();
+            await TestServiceDiscoveryAsync();
+
             var cr = new CardReader("CardReader", "CardReader", "ws://localhost:1234");
-            _ = cr.StartAsync();
+            await cr.StartAsync();
+            await cr.ReadCard(true, true, false, false, 240000);
 
             //TestJsonMessage();
 
@@ -36,6 +37,17 @@ namespace TestAppConsol
             }
         }
 
+        private static void TestCardReader()
+        {
+            var cr = new CardReader("CardReader", "CardReader", "ws://localhost:1234");
+            _ = cr.StartAsync();
+        }
 
+        private static async Task TestServiceDiscoveryAsync()
+        {
+            var disc = new ServiceDiscovery();
+            await disc.GetPublishers();
+            await disc.GetServices();
+        }
     }
 }

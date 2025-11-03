@@ -27,11 +27,14 @@ namespace Devices
         public List<string> SupportedCommands { get; } = new();
         public List<string> SecureCommands { get; } = new();
         public bool IsConnected => _client?.Connected ?? false;
+        public bool IsSecureConnection { get; } = false;
 
         public int CommandNonceTimeout { get; set; } = 3600;
         public bool SecureConnection { get; set; }
 
         public event Action<Message>? OnEvent = null;
+        public List<Message> SessionEvents = new();
+        public List<Message> TransactionEvents = new();
 
         [JsonInclude] public DeviceStatusEnum? DeviceStatus { get; protected set; } = DeviceStatusEnum.noDevice;
         [JsonInclude] public DevicePositionStatusEnum? DevicePositionStatus { get; protected set; }
@@ -50,14 +53,16 @@ namespace Devices
         [JsonInclude] public bool HardwareSecurityElementCp { get; protected set; }
         [JsonInclude] public ResponseSecurityEnabledEnum? ResponseSecurityEnabledCp { get; protected set; }
 
-        public Device(string name, string id, string uri)
+        public Device(string name, string id, string uri, bool isSecure = false)
         {
             Name = name;
             Id = id;
             Uri = uri;
             utils = new(GetType().ToString());
 
-            _client = new WatsonWsClient(new Uri(uri));
+            var adress = new Uri(uri);
+            IsSecureConnection = isSecure;
+            _client = new WatsonWsClient(adress.Host, adress.Port, isSecure);
 
             _client.ServerConnected += (s, e) =>
             {
@@ -122,8 +127,8 @@ namespace Devices
 
                 if (!_capabilitiesFetched)
                 {
-                    GetStatus();
-                    GetCapabilities();
+                    await GetStatus();
+                    await GetCapabilitiesAsync();
                 }
 
                 utils.LogInfo($"Device {Name}/{Id} started successfully");
@@ -134,6 +139,40 @@ namespace Devices
                 utils.LogError($"Exception while starting device {Name}/{Id}: {ex.Message}");
                 return false;
             }
+        }
+
+        public async Task StopAsync()
+        {
+            if (_disposed) return;
+            utils.LogInfo($"Stopping device {Name}/{Id}");
+            await _client.StopAsync();
+            DeviceStatus = DeviceStatusEnum.noDevice;
+        }
+
+        public void NewSession()
+        {
+            SessionEvents.Clear();
+            TransactionEvents.Clear();
+        }
+        public void EndSession()
+        {
+            
+
+        }
+
+        public void NewTransaction()
+        {
+            TransactionEvents.Clear();
+        }
+        public void EndTransaction()
+        {
+
+        }
+
+        protected void SaveEvent(Message ev)
+        {
+            SessionEvents.Add(ev);
+            TransactionEvents.Add(ev);
         }
 
         protected async Task SendCommand(Command cmd)
@@ -162,11 +201,18 @@ namespace Devices
                 Payload = msg.Payload
             };
 
+            OnEvent?.Invoke(msg);
+            DeviceSpecialEventHandling(evt);
+
             _events.Enqueue(evt);
             _eventSignal.Release();
 
-            OnEvent?.Invoke(msg);
             utils.LogDebug($"[{Name}] Event queued (count={_events.Count})");
+        }
+
+        protected virtual void DeviceSpecialEventHandling(DeviceEvent evt)
+        {
+            
         }
 
         public DeviceEvent? GetEvent(int timeoutMs)
@@ -206,21 +252,21 @@ namespace Devices
             return true;
         }
 
-        public void Cancel(int[] ids = null)
+        public async Task Cancel(int[] ids = null)
         {
             var cmd = new Command(CommonCommands.Common_Cancel)
             {
                 Payload = ids != null ? new { requestIds = ids } : null
             };
 
-            SendCommand(cmd);
+            await SendCommand(cmd);
             _ = GetEvent(500);
         }
 
-        public void GetCapabilities()
+        public async Task GetCapabilitiesAsync()
         {
             var cmd = new Command(CommonCommands.Common_Capabilities);
-            SendCommand(cmd);
+            await SendCommand(cmd);
 
             var res = GetEvent(60000);
             if (res?.Payload == null)
@@ -229,15 +275,15 @@ namespace Devices
                 return;
             }
 
-            SetCapabilities(res.Payload);
+            SetCommonCapabilities(res.Payload);
             UpdateDeviceCapabilities(res.Payload);
         }
 
-        public void GetStatus()
+        public async Task GetStatus()
         {
             utils.LogInfo($"[{Name}] Requesting status");
             var cmd = new Command(CommonCommands.Common_Status);
-            SendCommand(cmd);
+            await SendCommand(cmd);
 
             var res = GetEvent(60000);
             if (res?.Payload == null)
@@ -246,11 +292,11 @@ namespace Devices
                 return;
             }
 
-            SetStatus(res.Payload);
+            SetCommonStatus(res.Payload);
             UpdateDeviceStatus(res.Payload);
         }
 
-        public void SetCapabilities(object? payload)
+        public void SetCommonCapabilities(object? payload)
         {
             try
             {
@@ -288,7 +334,7 @@ namespace Devices
             }
         }
 
-        public void SetStatus(object? payload)
+        public void SetCommonStatus(object? payload)
         {
             try
             {

@@ -4,8 +4,6 @@ using System.Text;
 
 namespace Devices
 {
-
-
     public class InternalException : Exception
     {
         public InternalException(string message) : base(message) { }
@@ -75,9 +73,9 @@ namespace Devices
     public class CommonEvents
     {
         //unsolic
-        public const string Common_StatusChangedEvent = "Common.StatusChangedEvent";
-        public const string Common_ErrorEvent = "Common.ErrorEvent";
-        public const string Common_NonceClearedEvent = "Common.NonceClearedEvent";
+        public const string Common_StatusChangedEvent_Unsolic = "Common.StatusChangedEvent";
+        public const string Common_ErrorEvent_Unsolic = "Common.ErrorEvent";
+        public const string Common_NonceClearedEvent_Unsolic = "Common.NonceClearedEvent";
     }
 
     //#################### Card Reader constants ####################
@@ -106,9 +104,9 @@ namespace Devices
         public const string CardReader_TrackDetectedEvent = "CardReader.TrackDetectedEvent";
         public const string CardReader_EMVClessReadStatusEvent = "CardReader.EMVClessReadStatusEvent";
         //unsolic
-        public const string CardReader_MediaRemovedEvent = "CardReader.MediaRemovedEvent";
-        public const string CardReader_CardActionEvent = "CardReader.CardActionEvent";
-        public const string CardReader_MediaDetectedEvent = "CardReader.MediaDetectedEvent";
+        public const string CardReader_MediaRemovedEvent_Unsolic = "CardReader.MediaRemovedEvent";
+        public const string CardReader_CardActionEvent_Unsolic = "CardReader.CardActionEvent";
+        public const string CardReader_MediaDetectedEvent_Unsolic = "CardReader.MediaDetectedEvent";
     }
 
     public static class XFS4IoT
