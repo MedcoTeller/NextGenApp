@@ -1,15 +1,14 @@
 ﻿using Devices.Events;
 using GlobalShared;
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Text;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 using WatsonWebsocket;
-using Websocket.Client;
 
 namespace Devices
 {
-    public class Device : IDisposable
+    public class Device : ObservableObject, IDisposable
     {
         private readonly WatsonWsClient _client;
         private readonly ConcurrentQueue<DeviceEvent> _events = new();
@@ -36,13 +35,29 @@ namespace Devices
         public List<Message> SessionEvents = new();
         public List<Message> TransactionEvents = new();
 
-        [JsonInclude] public DeviceStatusEnum? DeviceStatus { get; protected set; } = DeviceStatusEnum.noDevice;
-        [JsonInclude] public DevicePositionStatusEnum? DevicePositionStatus { get; protected set; }
+        // Status
+        private DeviceStatusEnum _deviceStatus = DeviceStatusEnum.noDevice;
+        [JsonInclude] public DeviceStatusEnum? DeviceStatus
+        {
+            get => _deviceStatus;
+            protected set => SetProperty(ref _deviceStatus, value ?? DeviceStatusEnum.noDevice);
+        }
+
+        private DevicePositionStatusEnum? _devicePositionStatus = null;
+        [JsonInclude] public DevicePositionStatusEnum? DevicePositionStatus { get => _devicePositionStatus; protected set=> SetProperty(ref _devicePositionStatus, value); }
+
+        private AntiFraudModuleStatusEnum? _antiFraudModuleStatus = null;
+        [JsonInclude] public AntiFraudModuleStatusEnum? AntiFraudModuleStatus { get => _antiFraudModuleStatus; protected set => SetProperty(ref _antiFraudModuleStatus, value); }
+        
+        private ExchangeStatusEnum? _exchangeStatus = null;
+        [JsonInclude] public ExchangeStatusEnum? ExchangeStatus { get => _exchangeStatus; protected set => SetProperty(ref _exchangeStatus, value); }
+
+        private EndToEndSecurityStatusEnum? _endToEndSecurityStatus = null;
+        [JsonInclude] public EndToEndSecurityStatusEnum? EndToEndSecurityStatus { get => _endToEndSecurityStatus; protected set => SetProperty(ref _endToEndSecurityStatus, value); }
+
+        private int _remainingCapacityStatus = 0;
+        [JsonInclude] public int RemainingCapacityStatus { get => _remainingCapacityStatus; protected set => SetProperty(ref _remainingCapacityStatus, value); }
         [JsonInclude] public int PowerSaveRecoveryTime { get; protected set; }
-        [JsonInclude] public AntiFraudModuleStatusEnum? AntiFraudModuleStatus { get; protected set; }
-        [JsonInclude] public ExchangeStatusEnum? ExchangeStatus { get; protected set; }
-        [JsonInclude] public EndToEndSecurityStatusEnum? EndToEndSecurityStatus { get; protected set; }
-        [JsonInclude] public int RemainingCapacityStatus { get; protected set; }
 
         // Capabilities
         [JsonInclude] public string ServiceVersion { get; protected set; }
@@ -147,6 +162,12 @@ namespace Devices
             utils.LogInfo($"Stopping device {Name}/{Id}");
             await _client.StopAsync();
             DeviceStatus = DeviceStatusEnum.noDevice;
+        }
+
+        protected override bool SetProperty<T>(ref T field, T newValue, [CallerMemberName] string propertyName = "")
+        {
+            utils.LogInfo($"PropertySacnge: {propertyName} changed from {field} to {newValue}");
+            return base.SetProperty(ref field, newValue, propertyName);
         }
 
         public void NewSession()
@@ -489,5 +510,67 @@ namespace Devices
     {
         active,     //- A customer transaction is in progress.
         inactive    //- No customer transaction is in progress.
+    }
+
+    /// <summary>
+    /// Provides data for an event that is raised when the value of a property changes.
+    /// </summary>
+    /// <remarks>Use this class to access the name of the property that changed, as well as its previous and
+    /// new values, when handling property change notifications. This event argument is commonly used in scenarios where
+    /// tracking changes to object properties is required, such as implementing undo functionality or responding to user
+    /// input.</remarks>
+    public class PropertyValueChangedEventArgs : EventArgs
+    {
+        public string PropertyName { get; }
+        public object? OldValue { get; }
+        public object? NewValue { get; }
+
+        public PropertyValueChangedEventArgs(string propertyName, object? oldValue, object? newValue)
+        {
+            PropertyName = propertyName;
+            OldValue = oldValue;
+            NewValue = newValue;
+        }
+    }
+
+    /// <summary>
+    /// Provides a base class for objects that notify listeners when one of their properties changes, including the
+    /// property's name, old value, and new value.
+    /// </summary>
+    /// <remarks>ObservableObject is typically used as a base class for view models or other data-bound
+    /// objects that require property change notifications. It simplifies implementing property setters that
+    /// automatically raise change events, enabling data binding scenarios in UI frameworks such as WPF, UWP, or
+    /// Xamarin. The PropertyValueChanged event includes both the old and new values, allowing subscribers to react to
+    /// changes with full context. This class is thread-agnostic; derived classes should ensure thread safety if
+    /// properties are accessed from multiple threads.</remarks>
+    public abstract class ObservableObject
+    {
+        /// <summary>
+        /// Fires whenever any property changes, including the property name, old value, and new value.
+        /// </summary>
+        public event EventHandler<PropertyValueChangedEventArgs>? PropertyValueChanged;
+
+        /// <summary>
+        /// Helper for setting properties and raising PropertyValueChanged automatically.
+        /// </summary>
+        protected virtual bool SetProperty<T>(ref T field, T newValue, [CallerMemberName] string propertyName = "")
+        {
+            if (EqualityComparer<T>.Default.Equals(field, newValue))
+                return false;
+
+            var oldValue = field;
+            field = newValue;
+
+            OnPropertyValueChanged(propertyName, oldValue, newValue);
+            return true;
+        }
+
+        /// <summary>
+        /// Raises the PropertyValueChanged event.
+        /// </summary>
+        protected virtual void OnPropertyValueChanged<T>(string propertyName, T oldValue, T newValue)
+        {
+            PropertyValueChanged?.Invoke(this, new PropertyValueChangedEventArgs(propertyName, oldValue, newValue));
+        }
     }
 }

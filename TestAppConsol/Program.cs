@@ -14,6 +14,10 @@ namespace TestAppConsol
             await TestServiceDiscoveryAsync();
 
             var cr = new CardReader("CardReader", "CardReader", "ws://localhost:1234");
+            cr.PropertyValueChanged += (s, e) =>
+            {
+                Console.WriteLine($"Property {e.PropertyName} changed to {e.NewValue}");
+            };
             await cr.StartAsync();
             await cr.ReadCard(true, true, false, false, 240000);
 

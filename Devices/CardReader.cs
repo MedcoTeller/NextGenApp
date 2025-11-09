@@ -1,6 +1,9 @@
 ﻿using Devices.Events;
 using System.Net.NetworkInformation;
+using System.Reactive;
 using System.Reflection.PortableExecutable;
+using System.Runtime.Intrinsics.Arm;
+using System.Security.Cryptography;
 using WatsonWebsocket;
 using static System.Net.Mime.MediaTypeNames;
 
@@ -15,8 +18,62 @@ namespace Devices
 
         public CardReader(string name, string id, WatsonWsClient client) : base(name, id, client)
         {
-            
+
         }
+
+        //Status:
+        private MediaStatus? _media = MediaStatus.unknown;
+        public MediaStatus? Media
+        {
+            get => _media;
+            private set => SetProperty(ref _media, value);
+        }
+
+        private string? _security;
+        public string? Security
+        {
+            get => _security;
+            private set => SetProperty(ref _security, value);
+        }
+
+        private ChipPowerStatus? _chipPower;
+        public ChipPowerStatus? ChipPower
+        {
+            get => _chipPower;
+            private set => SetProperty(ref _chipPower, value);
+        }
+
+        private ChipModuleStatus? _chipModule;
+        public ChipModuleStatus? ChipModule
+        {
+            get => _chipModule;
+            private set => SetProperty(ref _chipModule, value);
+        }
+
+        private string? _magWriteModule;
+        public string? MagWriteModule
+        {
+            get => _magWriteModule;
+            private set => SetProperty(ref _magWriteModule, value);
+        }
+
+        private string? _frontImageModule;
+        public string? FrontImageModule
+        {
+            get => _frontImageModule;
+            private set => SetProperty(ref _frontImageModule, value);
+        }
+
+        private string? _backImageModule;
+        public string? BackImageModule
+        {
+            get => _backImageModule;
+            private set => SetProperty(ref _backImageModule, value);
+        }
+
+        //Capabilities:
+
+
         protected override void UpdateDeviceStatus(object? payload)
         {
             if (payload == null)
@@ -32,16 +89,16 @@ namespace Devices
 
         protected override void DeviceSpecialEventHandling(DeviceEvent evt)
         {
-            switch(evt.Header.Name)
+            switch (evt.Header.Name)
             {
                 case CardReaderCommands.CardReader_Move:
-                    
+
                     break;
                 case CardReaderCommands.CardReader_ReadRawData:
 
                     break;
                 case CardReaderEvents.CardReader_MediaRemovedEvent_Unsolic:
-                    
+
                     break;
                 case CardReaderEvents.CardReader_MediaInsertedEvent:
 
@@ -61,7 +118,8 @@ namespace Devices
         public async Task ReadCard(bool track1, bool trak2, bool Track3, bool chip, int timeout = 0)
         {
             var cmd = new Command(CardReaderCommands.CardReader_ReadRawData, timeout);
-            cmd.Payload = new {
+            cmd.Payload = new
+            {
                 track1 = track1,
                 track2 = trak2,
                 track3 = Track3,
@@ -89,13 +147,47 @@ namespace Devices
         public async Task EjectCard(int timeout = 0)
         {
             var cmd = new Command(CardReaderCommands.CardReader_Move, timeout);
-            cmd.Payload = new {
+            cmd.Payload = new
+            {
                 from = "exit",
                 to = "transport"
             };
             await SendCommand(cmd);
         }
 
+        public enum MediaStatus
+        {
+            unknown,    // - The media state cannot be determined with the device in its current state (e.g.the value of device is noDevice, powerOff, offline or hardwareError.
+            present,    // - Media is present in the device, not in the entering position and not jammed.On the latched dip device, this indicates that the card is present in the device and the card is unlatched.
+            notPresent, // - Media is not present in the device and not at the entering position.
+            jammed,     // - Media is jammed in the device; operator intervention is required.
+            entering,   // - Media is at the entry/exit slot of a motorized device.
+            latched,    // - Media is present and latched in a latched dip card unit.This means the card can be used for chip card dialog.
+        }
 
+        public enum ChipPowerStatus
+        {
+            unknown,    // - The media state cannot be determined with the device in its current state (e.g.the value of device is noDevice, powerOff, offline or hardwareError.
+            present,    // - Media is present in the device, not in the entering position and not jammed.On the latched dip device, this indicates that the card is present in the device and the card is unlatched.
+            notPresent, // - Media is not present in the device and not at the entering position.
+            jammed,     // - Media is jammed in the device; operator intervention is required.
+            entering,   // - Media is at the entry/exit slot of a motorized device.
+            latched,    // - Media is present and latched in a latched dip card unit.This means the card can be used for chip card dialog.
+        }
+
+        public enum ChipModuleStatus
+        {
+            ok, // - The chip card module is in a good state.
+            inoperable, // - The chip card module is inoperable.
+            unknown, // - The state of the chip card module cannot be determined.
+        }
+
+
+        public enum GeneralStatus
+        {
+            ok, // - The chip card module is in a good state.
+            inoperable, // - The chip card module is inoperable.
+            unknown, // - The state of the chip card module cannot be determined.
+        }
     }
 }
