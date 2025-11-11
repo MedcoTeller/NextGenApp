@@ -35,7 +35,7 @@ namespace Devices
         public List<Message> SessionEvents = new();
         public List<Message> TransactionEvents = new();
 
-        // Status
+        // Common Status
         private DeviceStatusEnum _deviceStatus = DeviceStatusEnum.noDevice;
         [JsonInclude] public DeviceStatusEnum? DeviceStatus
         {
@@ -59,7 +59,7 @@ namespace Devices
         [JsonInclude] public int RemainingCapacityStatus { get => _remainingCapacityStatus; protected set => SetProperty(ref _remainingCapacityStatus, value); }
         [JsonInclude] public int PowerSaveRecoveryTime { get; protected set; }
 
-        // Capabilities
+        // Common Capabilities
         [JsonInclude] public string ServiceVersion { get; protected set; }
         [JsonInclude] public string ModelName { get; protected set; }
         [JsonInclude] public bool PowerSaveControlCp { get; protected set; }
@@ -68,6 +68,7 @@ namespace Devices
         [JsonInclude] public bool HardwareSecurityElementCp { get; protected set; }
         [JsonInclude] public ResponseSecurityEnabledEnum? ResponseSecurityEnabledCp { get; protected set; }
 
+        //Constructors
         public Device(string name, string id, string uri, bool isSecure = false)
         {
             Name = name;
@@ -133,6 +134,15 @@ namespace Devices
             };
         }
 
+        /// <summary>
+        /// Asynchronously starts the device and initializes its capabilities if they have not been fetched.
+        /// </summary>
+        /// <remarks>If the device's capabilities have not been previously fetched, this method will
+        /// retrieve the current status and capabilities as part of the start process. The method logs informational and
+        /// error messages during execution. This method does not throw exceptions; any errors encountered during
+        /// startup are logged and result in a return value of <see langword="false"/>.</remarks>
+        /// <returns>A task that represents the asynchronous operation. The task result is <see langword="true"/> if the device
+        /// was started successfully; otherwise, <see langword="false"/>.</returns>
         public async Task<bool> StartAsync()
         {
             try
@@ -156,6 +166,12 @@ namespace Devices
             }
         }
 
+        /// <summary>
+        /// Asynchronously stops the device and updates its status to indicate that it is no longer available.
+        /// </summary>
+        /// <remarks>If the device has already been disposed, this method returns immediately without
+        /// performing any action.</remarks>
+        /// <returns>A task that represents the asynchronous stop operation.</returns>
         public async Task StopAsync()
         {
             if (_disposed) return;
@@ -170,21 +186,37 @@ namespace Devices
             return base.SetProperty(ref field, newValue, propertyName);
         }
 
+        /// <summary>
+        /// Clears all session and transaction events to start a new session.
+        /// </summary>
+        /// <remarks>Call this method to reset the event collections before beginning a new session. This
+        /// is typically used to discard any previous events and ensure that subsequent operations are tracked from a
+        /// clean state.</remarks>
         public void NewSession()
         {
             SessionEvents.Clear();
             TransactionEvents.Clear();
         }
+
+
         public void EndSession()
         {
             
 
         }
 
+        /// <summary>
+        /// Begins a new transaction by clearing all recorded transaction events.
+        /// </summary>
+        /// <remarks>Call this method to reset the transaction state before starting a new set of
+        /// operations. This method removes any previously recorded events, ensuring that subsequent transaction
+        /// operations start with a clean slate.</remarks>
         public void NewTransaction()
         {
             TransactionEvents.Clear();
         }
+
+
         public void EndTransaction()
         {
 
@@ -196,6 +228,15 @@ namespace Devices
             TransactionEvents.Add(ev);
         }
 
+        /// <summary>
+        /// Sends the specified command to the remote client and waits for an acknowledgment.
+        /// </summary>
+        /// <remarks>This method increments the request identifier for each command sent and logs the
+        /// operation. The method is asynchronous and should be awaited to ensure the command is sent and acknowledged
+        /// before proceeding.</remarks>
+        /// <param name="cmd">The command to send. Must not be null and should contain a valid header and payload.</param>
+        /// <returns>A task that represents the asynchronous send operation.</returns>
+        /// <exception cref="InvalidOperationException">Thrown if an acknowledgment is not received from the remote client after sending the command.</exception>
         protected async Task SendCommand(Command cmd)
         {
             cmd.Header.RequestId = Interlocked.Increment(ref _requestId);
@@ -207,10 +248,18 @@ namespace Devices
             if (!ConfirmAcknowledge(cmd))
             {
                 utils.LogError($"[{Name}] Failed to receive acknowledge for command {cmd.Header.Name}");
-                throw new InvalidOperationException($"Acknowledge not received for {cmd.Header.Name}");
+                throw new InvalidOperationException($"Acknowledge was not received for {cmd.Header.Name}");
             }
         }
 
+        /// <summary>
+        /// Handles an incoming message represented as a JSON string and triggers the corresponding device event
+        /// processing.
+        /// </summary>
+        /// <remarks>This method parses the incoming JSON message, creates a device event, and enqueues it
+        /// for further processing. Derived classes can override this method to customize message handling
+        /// behavior.</remarks>
+        /// <param name="json">A JSON-formatted string containing the message data to be processed. Must not be null or empty.</param>
         protected virtual void OnMessage(string json)
         {
             utils.LogDebug($"[{Name}] Received: {json}");
@@ -236,12 +285,21 @@ namespace Devices
             
         }
 
+        /// <summary>
+        /// Waits for and retrieves the next available device event within the specified timeout period.
+        /// </summary>
+        /// <remarks>If the object has been disposed, the method returns <see langword="null"/>
+        /// immediately without waiting. This method does not block indefinitely; it will return after the specified
+        /// timeout if no event is available.</remarks>
+        /// <param name="timeoutMs">The maximum time, in milliseconds, to wait for an event to become available.Timeout.Infinite or -1 for infinit wait</param>
+        /// <returns>A <see cref="DeviceEvent"/> instance representing the next available event if one is received within the
+        /// timeout period; otherwise, <see langword="null"/>.</returns>
         public DeviceEvent? GetEvent(int timeoutMs)
         {
             if (_disposed) return null;
             utils.LogDebug($"[{Name}] Waiting for event ({timeoutMs}ms)");
 
-            if (_eventSignal.Wait(timeoutMs))
+            if (_eventSignal.Wait(timeoutMs < 0? Timeout.Infinite : timeoutMs))
             {
                 if (_events.TryDequeue(out var evnt))
                 {
@@ -273,6 +331,11 @@ namespace Devices
             return true;
         }
 
+        /// <summary>
+        /// Cancels the requests identified by the specified IDs asynchronously.
+        /// </summary>
+        /// <param name="ids">An array of request IDs to cancel. If null, all pending requests will be cancelled.</param>
+        /// <returns>A task that represents the asynchronous cancel operation.</returns>
         public async Task Cancel(int[] ids = null)
         {
             var cmd = new Command(CommonCommands.Common_Cancel)
@@ -284,6 +347,13 @@ namespace Devices
             _ = GetEvent(500);
         }
 
+        /// <summary>
+        /// Asynchronously retrieves the device's capabilities and updates the internal state accordingly.
+        /// </summary>
+        /// <remarks>This method sends a command to query the device's capabilities and updates the
+        /// internal capability information upon receiving a response. If no response is received within the timeout
+        /// period, the capabilities are not updated.</remarks>
+        /// <returns>A task that represents the asynchronous operation.</returns>
         public async Task GetCapabilitiesAsync()
         {
             var cmd = new Command(CommonCommands.Common_Capabilities);
@@ -297,9 +367,15 @@ namespace Devices
             }
 
             SetCommonCapabilities(res.Payload);
-            UpdateDeviceCapabilities(res.Payload);
+            UpdateDeviceSpecificCapabilities(res.Payload);
         }
 
+        /// <summary>
+        /// Requests the current status from the device asynchronously and updates the internal status information.
+        /// </summary>
+        /// <remarks>If the device does not respond within the timeout period, the status information will
+        /// not be updated.</remarks>
+        /// <returns>A task that represents the asynchronous operation.</returns>
         public async Task GetStatus()
         {
             utils.LogInfo($"[{Name}] Requesting status");
@@ -314,10 +390,10 @@ namespace Devices
             }
 
             SetCommonStatus(res.Payload);
-            UpdateDeviceStatus(res.Payload);
+            UpdateDeviceSpecificStatus(res.Payload);
         }
 
-        public void SetCommonCapabilities(object? payload)
+        protected void SetCommonCapabilities(object? payload)
         {
             try
             {
@@ -355,7 +431,7 @@ namespace Devices
             }
         }
 
-        public void SetCommonStatus(object? payload)
+        protected void SetCommonStatus(object? payload)
         {
             try
             {
@@ -385,8 +461,8 @@ namespace Devices
             }
         }
 
-        protected virtual void UpdateDeviceStatus(object? payload) { }
-        protected virtual void UpdateDeviceCapabilities(object? payload) { }
+        protected virtual void UpdateDeviceSpecificStatus(object? payload) { }
+        protected virtual void UpdateDeviceSpecificCapabilities(object? payload) { }
 
         public void Dispose()
         {
