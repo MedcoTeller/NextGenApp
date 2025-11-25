@@ -1,4 +1,5 @@
-﻿using GlobalShared;
+﻿using Devices.Common;
+using GlobalShared;
 using Microsoft.CSharp.RuntimeBinder;
 using System;
 using System.Collections.Generic;
