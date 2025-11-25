@@ -1,4 +1,5 @@
 ﻿using Devices;
+using Devices.Common;
 using GlobalShared;
 using System.Threading.Tasks;
 

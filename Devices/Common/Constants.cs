@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace Devices
+namespace Devices.Common
 {
     public class InternalException : Exception
     {

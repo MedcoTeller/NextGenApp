@@ -1,5 +1,4 @@
-﻿
-namespace Devices
+﻿namespace Devices.Common
 {
     public class Command : Message
     {

@@ -1,5 +1,4 @@
-﻿
-namespace Devices.Events
+﻿namespace Devices.Common
 {
     public class DeviceEvent:Message
     {

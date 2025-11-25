@@ -1,7 +1,7 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Devices
+namespace Devices.Common
 {
     /// <summary>
     /// Represents the type of message exchanged between devices.

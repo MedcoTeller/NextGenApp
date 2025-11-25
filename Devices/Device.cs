@@ -1,4 +1,4 @@
-﻿using Devices.Events;
+﻿using Devices.Common;
 using GlobalShared;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
@@ -274,10 +274,39 @@ namespace Devices
             OnEvent?.Invoke(msg);
             DeviceSpecialEventHandling(evt);
 
+            if(evt.Header.RequestId == 0)//unsolicited event
+            {
+                if(evt.Header.Name == CommonEvents.Common_StatusChangedEvent_Unsolic)
+                {
+                    SetCommonStatus(evt.Payload);
+                    UpdateDeviceSpecificStatus(evt.Payload);
+                    return;
+                }
+                else if(evt.Header.Name == CommonEvents.Common_ErrorEvent_Unsolic)
+                {
+                    SetCommonStatus(evt.Payload);
+                    UpdateDeviceSpecificStatus(evt.Payload);
+                    return;
+                }
+                else if(evt.Header.Name == CommonEvents.Common_NonceClearedEvent_Unsolic)
+                {
+                    
+                }
+                else
+                {
+                    DeviceUnsolicEventHundler(evt);
+                }
+            }
+
             _events.Enqueue(evt);
             _eventSignal.Release();
 
             utils.LogDebug($"[{Name}] Event queued (count={_events.Count})");
+        }
+
+        protected virtual void DeviceUnsolicEventHundler(DeviceEvent evt)
+        {
+            
         }
 
         protected virtual void DeviceSpecialEventHandling(DeviceEvent evt)

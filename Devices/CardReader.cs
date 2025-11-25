@@ -1,12 +1,5 @@
-﻿using Devices.Events;
-using System.Net.NetworkInformation;
-using System.Reactive;
-using System.Reflection.PortableExecutable;
-using System.Runtime.Intrinsics.Arm;
-using System.Security.Cryptography;
+﻿using Devices.Common;
 using WatsonWebsocket;
-using static System.Net.Mime.MediaTypeNames;
-using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace Devices
 {
@@ -44,11 +37,11 @@ namespace Devices
             private set => SetProperty(ref _chipPowerStatus, value);
         }
 
-        private ChipModuleStatusEnum? _chipModule;
-        public ChipModuleStatusEnum? ChipModule
+        private ChipModuleStatusEnum? _chipModuleStatus;
+        public ChipModuleStatusEnum? ChipModuleStatus
         {
-            get => _chipModule;
-            private set => SetProperty(ref _chipModule, value);
+            get => _chipModuleStatus;
+            private set => SetProperty(ref _chipModuleStatus, value);
         }
 
         private MagWriteModuleStatusEnum? _magWriteModuleStatus = null;
@@ -75,24 +68,27 @@ namespace Devices
         //Capabilities:
         public CardReaderTypeEnum? CardReaderType { get; private set; } = null;
 
-        public bool CanReadTrac1Cp { get; private set; } = false;
-        public bool CanReadTrac2Cp { get; private set; } = false;
-        public bool CanReadTrac3Cp { get; private set; } = false;
+        public bool CanReadTrack1Cp { get; private set; } = false;
+        public bool CanReadTrack2Cp { get; private set; } = false;
+        public bool CanReadTrack3Cp { get; private set; } = false;
         public bool CanReadWaterMarkCp { get; private set; } = false;
-        public bool CanReadFrontTrac1 { get; private set; } = false;
+        public bool CanReadFrontTrack1Cp { get; private set; } = false;
         public bool CanReadFrontImageCp { get; private set; } = false;
         public bool CanReadBackImageCp { get; private set; } = false;
-        public bool CanReadTrac1JISCp { get; private set; } = false;
-        public bool CanReadTrac3JISCp { get; private set; } = false;
-        public bool CanWriteTrac1Cp { get; private set; } = false;
-        public bool CanWriteTrac2Cp { get; private set; } = false;
-        public bool CanWriteTrac3Cp { get; private set; } = false;
+        public bool CanReadTrack1JISCp { get; private set; } = false;
+        public bool CanReadTrack3JISCp { get; private set; } = false;
+        public bool CanReadDdiCp { get; private set; } = false;
+
+        public bool CanWriteTrack1Cp { get; private set; } = false;
+        public bool CanWriteTrack2Cp { get; private set; } = false;
+        public bool CanWriteTrack3Cp { get; private set; } = false;
         public bool CanWriteWaterMarkCp { get; private set; } = false;
-        public bool CanWriteFrontTrac1Cp { get; private set; } = false;
+        public bool CanWriteFrontTrack1Cp { get; private set; } = false;
         public bool CanWriteFrontImageCp { get; private set; } = false;
         public bool CanWriteBackImageCp { get; private set; } = false;
-        public bool CanWriteTrac1JISCp { get; private set; } = false;
-        public bool CanWriteTrac3JISCp { get; private set; } = false;
+        public bool CanWriteTrack1JISCp { get; private set; } = false;
+        public bool CanWriteTrack3JISCp { get; private set; } = false;
+
         public bool ChipProtocolsChipT0Cp { get; private set; } = false;
         public bool ChipProtocolsChipT1Cp { get; private set; } = false;
         public bool ChipProtocolNotRequiredCp { get; private set; } = false;
@@ -122,14 +118,83 @@ namespace Devices
         {
             if (payload == null)
                 return;
-
+            if (Enum.TryParse(Message.GetPayloadValue<string>(payload, "cardreader.media"), out MediaStatusEnum s))
+                MediaStatus = s;
+            if (Enum.TryParse(Message.GetPayloadValue<string>(payload, "cardreader.frontImageModule"), out FrontImageModuleStatusEnum fis))
+                FrontImageModuleStatus = fis;
+            if (Enum.TryParse(Message.GetPayloadValue<string>(payload, "cardreader.magWriteModule"), out MagWriteModuleStatusEnum mws))
+                MagWriteModuleStatus = mws;
+            if (Enum.TryParse(Message.GetPayloadValue<string>(payload, "cardreader.chipModule"), out ChipModuleStatusEnum cms))
+                ChipModuleStatus = cms;
+            if (Enum.TryParse(Message.GetPayloadValue<string>(payload, "cardreader.chipPower"), out ChipPowerStatusEnum cps))
+                ChipPowerStatus = cps;
+            if (Enum.TryParse(Message.GetPayloadValue<string>(payload, "cardreader.security"), out CardReaderSecurityStatusEnum ss))
+                SecurityStatus = ss;
+            if (Enum.TryParse(Message.GetPayloadValue<string>(payload, "cardreader.backImageModule"), out BackImageModuleStatusEnum b))
+                BackImageModuleStatus = b;
         }
 
         protected override void UpdateDeviceSpecificCapabilities(object? payload)
         {
             if (payload == null)
                 return;
+            //ServiceVersion = Message.GetPayloadValue<string>(payload, "cardreader.serviceVersion");
 
+            if (Enum.TryParse(Message.GetPayloadValue<string>(payload, "cardreader.type"), out CardReaderTypeEnum ct))
+                CardReaderType = ct;
+            if (Enum.TryParse(Message.GetPayloadValue<string>(payload, "cardreader.securityType"), out CardreaderSecurityCpEnum cs))
+                CardreaderSecurityCp = cs;
+            if (Enum.TryParse(Message.GetPayloadValue<string>(payload, "cardreader.powerOnOption"), out PowerOptionCpEnum po))
+                PowerOnOptionCp = po;
+            if (Enum.TryParse(Message.GetPayloadValue<string>(payload, "cardreader.powerOffOption"), out PowerOptionCpEnum pof))
+                PowerOffOptionCp = pof;
+
+            CanReadTrack1Cp = Message.GetPayloadValue<bool>(payload, "cardreader.readTracks.track1");
+            CanReadTrack2Cp = Message.GetPayloadValue<bool>(payload, "cardreader.readTracks.track2");
+            CanReadTrack3Cp = Message.GetPayloadValue<bool>(payload, "cardreader.readTracks.track3");
+            CanReadTrack1Cp = Message.GetPayloadValue<bool>(payload, "cardreader.readTracks.watermark");
+            CanReadFrontTrack1Cp = Message.GetPayloadValue<bool>(payload, "cardreader.readTracks.frontTrack1");
+            CanReadFrontImageCp = Message.GetPayloadValue<bool>(payload, "cardreader.readTracks.frontImage");
+            CanReadBackImageCp = Message.GetPayloadValue<bool>(payload, "cardreader.readTracks.backImage");
+            CanReadTrack1JISCp = Message.GetPayloadValue<bool>(payload, "cardreader.readTracks.track1JIS");
+            CanReadTrack3JISCp = Message.GetPayloadValue<bool>(payload, "cardreader.readTracks.track3JIS");
+            CanReadDdiCp = Message.GetPayloadValue<bool>(payload, "cardreader.readTracks.ddi");
+
+            CanWriteTrack1Cp = Message.GetPayloadValue<bool>(payload, "cardreader.writeTracks.track1");
+            CanWriteTrack2Cp = Message.GetPayloadValue<bool>(payload, "cardreader.writeTracks.track2");
+            CanWriteTrack3Cp = Message.GetPayloadValue<bool>(payload, "cardreader.writeTracks.track3");
+            CanWriteTrack1Cp = Message.GetPayloadValue<bool>(payload, "cardreader.writeTracks.watermark");
+            CanWriteFrontTrack1Cp = Message.GetPayloadValue<bool>(payload, "cardreader.writeTracks.frontTrack1");
+            CanWriteFrontImageCp = Message.GetPayloadValue<bool>(payload, "cardreader.writeTracks.frontImage");
+            CanWriteBackImageCp = Message.GetPayloadValue<bool>(payload, "cardreader.writeTracks.backImage");
+            CanWriteTrack1JISCp = Message.GetPayloadValue<bool>(payload, "cardreader.writeTracks.track1JIS");
+            CanWriteTrack3JISCp = Message.GetPayloadValue<bool>(payload, "cardreader.writeTracks.track3JIS");
+
+            ChipProtocolsChipT0Cp = Message.GetPayloadValue<bool>(payload, "cardreader.chipProtocols.chipT0");
+            ChipProtocolsChipT1Cp = Message.GetPayloadValue<bool>(payload, "cardreader.chipProtocols.chipT1");
+            ChipProtocolNotRequiredCp = Message.GetPayloadValue<bool>(payload, "cardreader.chipProtocols.chipProtocolNotRequired");
+            ChipProtocolsChipTypeAPart3Cp = Message.GetPayloadValue<bool>(payload, "cardreader.chipProtocols.chipTypeAPart3");
+            ChipProtocolsChipTypeAPart4Cp = Message.GetPayloadValue<bool>(payload, "cardreader.chipProtocols.chipTypeAPart4");
+            ChipProtocolsChipTypeBCp = Message.GetPayloadValue<bool>(payload, "cardreader.chipProtocols.chipTypeB");
+            ChipProtocolsChipTypeNFCCp = Message.GetPayloadValue<bool>(payload, "cardreader.chipProtocols.chipTypeNFC");
+
+            FluxSensorProgrammableCp = Message.GetPayloadValue<bool>(payload, "cardreader.fluxSensorProgrammable");
+            ReadWriteAccessFromExitCp = Message.GetPayloadValue<bool>(payload, "cardreader.readWriteAccessFromExit");
+
+            WriteModeHicoCp = Message.GetPayloadValue<bool>(payload, "cardreader.writeMode.hico");
+            WriteModeLocoCp = Message.GetPayloadValue<bool>(payload, "cardreader.writeMode.loco");
+            WriteModeAutoCp = Message.GetPayloadValue<bool>(payload, "cardreader.writeMode.auto");
+
+            ChipPowerColdCp = Message.GetPayloadValue<bool>(payload, "cardreader.chipPower.cold");
+            ChipPowerWarmCp = Message.GetPayloadValue<bool>(payload, "cardreader.chipPower.warm");
+            ChipPowerOffCp = Message.GetPayloadValue<bool>(payload, "cardreader.chipPower.off");
+
+            MemoryChipProtocolsSiemens4442Cp = Message.GetPayloadValue<bool>(payload, "cardreader.memoryChipProtocols.siemens4442");
+            MemoryChipProtocolsgpm896Cp = Message.GetPayloadValue<bool>(payload, "cardreader.memoryChipProtocols.gpm896");
+
+            PositionsExitCp = Message.GetPayloadValue<bool>(payload, "cardreader.positions.exit");
+            PositionsTransportCp = Message.GetPayloadValue<bool>(payload, "cardreader.positions.transport");
+            cardTakenSensorCp = Message.GetPayloadValue<bool>(payload, "cardreader.positions.cardTakenSensor");
         }
 
         protected override void DeviceSpecialEventHandling(DeviceEvent evt)
@@ -200,6 +265,108 @@ namespace Devices
             await SendCommand(cmd);
         }
 
+        public async Task RetainCard(int timeout = 0)
+        {
+            var cmd = new Command(CardReaderCommands.CardReader_Move, timeout);
+            cmd.Payload = new
+            {
+                from = "exit",
+                to = "retain"
+            };
+            await SendCommand(cmd);
+        }
+
+        public async Task PowerChip(ChipPowerOptionsEnum chipPowerOption, int timeout = 0)
+        {
+            var cmd = new Command(CardReaderCommands.CardReader_ChipPower, timeout);
+            cmd.Payload = new
+            {
+                chipPower = chipPowerOption
+            };
+            await SendCommand(cmd);
+        }
+
+        public async Task SetKey(string key, int timeout = 0)
+        {
+            var cmd = new Command(CardReaderCommands.CardReader_SetKey, timeout);
+            cmd.Payload = new
+            {
+                keyValue = key
+            };
+            await SendCommand(cmd);
+        }
+        public async Task ChipIO(string chipData, string chipProtocol, int timeout = 0)
+        {
+            var cmd = new Command(CardReaderCommands.CardReader_ChioIO, timeout);
+            cmd.Payload = new
+            {
+                chipProtocol = chipProtocol,
+                chipData = chipData
+            };
+            await SendCommand(cmd);
+        }
+
+        public async Task QueryIFMIdentifier(string emv, string europay, int timeout = 0)
+        {
+            var cmd = new Command(CardReaderCommands.CardReader_QueryIFMIdentifier, timeout);
+            cmd.Payload = new
+            {
+                ifmIdentifiers = new
+                {
+                    emv = "Example IFM Identifier",
+                    europay = ""
+                }
+            };
+            await SendCommand(cmd);
+        }
+
+        public async Task EMVClessQueryApplications(string emv, string europay, int timeout = 0)
+        {
+            var cmd = new Command(CardReaderCommands.CardReader_EMVClessQueryApplications, timeout);
+            cmd.Payload = new { };
+            await SendCommand(cmd);
+        }
+        public async Task EMVClessPerformTransaction(string data, int timeout = 0)
+        {
+            var cmd = new Command(CardReaderCommands.CardReader_EMVClessPerformTransaction, timeout);
+            cmd.Payload = new
+            {
+                data = data//base64
+            };
+            await SendCommand(cmd);
+        }
+        public async Task EMVClessConfigure(string emv, string europay, int timeout = 0)
+        {
+            var cmd = new Command(CardReaderCommands.CardReader_EMVClessConfigure, timeout);
+            cmd.Payload = new { };
+            /*
+             { 
+              "terminalData": "O2gAUACFyEARAJAC",
+              "aidData": [{
+                "aid": "O2gAUACFyEARAJAC",
+                "partialSelection": false,
+                "transactionType": 0,
+                "kernelIdentifier": "O2gAUACFyEARAJAC",
+                "configData": "O2gAUACFyEARAJAC"
+              }],
+              "keyData": [{
+                "rid": "O2gAUACFyEARAJAC",
+                "caPublicKey": {
+                  "index": 0,
+                  "algorithmIndicator": 0,
+                  "exponent": "O2gAUACFyEARAJAC",
+                  "modulus": "O2gAUACFyEARAJAC",
+                  "checksum": "O2gAUACFyEARAJAC"
+                }
+              }]
+            }
+            */
+            await SendCommand(cmd);
+        }
+
+
+
+        //Enums:
         public enum MediaStatusEnum
         {
             unknown,    // - The media state cannot be determined with the device in its current state (e.g.the value of device is noDevice, powerOff, offline or hardwareError.
@@ -279,6 +446,12 @@ namespace Devices
             transport,// - The card will be moved to the transport position.
         }
 
+        public enum ChipPowerOptionsEnum
+        {
+            cold,   // - The chip is powered on and reset.
+            warm,   // - The chip is reset.
+            off,    // - The chip is powered off.
+        }
 
     }
 }
