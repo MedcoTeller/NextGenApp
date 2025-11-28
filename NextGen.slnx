@@ -6,6 +6,7 @@
     <Project Path="C:/Users/h_moh/source/repos/NextGen/Logger/SharedLoggerClientLib/SharedLoggerClientLib.csproj" />
     <Project Path="C:/Users/h_moh/source/repos/NextGen/Logger/SharedLoggerLib/SharedLoggerLib.csproj" />
   </Folder>
+  <Project Path="AppStarter/AppStarter.csproj" Id="a6628581-e103-4904-bec2-aa9e4daf5b06" />
 
   <Project Path="C:/Users/h_moh/source/repos/NextGen/Devices/Devices.csproj" />
   <Project Path="C:/Users/h_moh/source/repos/NextGen/GlobalShared/GlobalShared.csproj" Id="49d387a4-c780-4b0c-b682-68307b209b1e" />

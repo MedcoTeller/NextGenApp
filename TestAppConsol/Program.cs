@@ -1,29 +1,63 @@
 ﻿using Devices;
 using Devices.Common;
 using GlobalShared;
+using Simulators;
 using System.Threading.Tasks;
+using System.Windows.Forms;
+using UI;
 
 namespace TestAppConsol
 {
     internal class Program
     {
+        [STAThread]
         static async Task Main(string[] args)
         {
             Console.WriteLine("Hello, World!");
 
+            Browser form = null;
+            var t = new Thread(() =>
+            {
+                Application.EnableVisualStyles();
+                Application.SetCompatibleTextRenderingDefault(false);
+                form = new Browser();
+                Application.Run(form);
+            });
+            t.SetApartmentState(ApartmentState.STA);
+            t.Start();
+            //Task T = Task.Run(() =>
+            //{
+            //    Application.EnableVisualStyles();
+            //    Application.SetCompatibleTextRenderingDefault(false);
+            //    form = new Browser();
+            //    Application.Run(form);
+            //});
+
+            //Console.WriteLine("Browser started");
             //var utils = new Utils("TestApp");
             await TestServiceDiscoveryAsync();
+            Console.WriteLine("service discovery done");
 
             var cr = new CardReader("CardReader", "CardReader", "ws://localhost:1234");
             cr.PropertyValueChanged += (s, e) =>
             {
                 Console.WriteLine($"Property {e.PropertyName} changed to {e.NewValue}");
             };
-            await cr.StartAsync();
-            await cr.ReadCard(true, true, false, false, 240000);
 
-            //TestJsonMessage();
+            //Console.WriteLine("Starting cardreader service");
+            //await cr.StartAsync();
 
+            //Console.WriteLine("Starting read card");
+            //await cr.ReadCard(true, true, false, false, 240000);
+
+            ////TestJsonMessage();
+            form?.Invoke(new Action(() =>
+            {
+                form.Text = "test";
+                form.Navigate("https://www.bing.com/");
+            }));
+
+            form?.Navigate("https://chatgpt.com/");
             Console.WriteLine($"END");
             Console.ReadLine();
         }
@@ -51,8 +85,13 @@ namespace TestAppConsol
         private static async Task TestServiceDiscoveryAsync()
         {
             var disc = new ServiceDiscovery();
+            Console.WriteLine("Before GetPublishers()");
             await disc.GetPublishers();
-            await disc.GetServices();
+            Console.WriteLine("After GetPublishers()"); // <- add this
+
+            Console.WriteLine("Before GetServices()");
+            await disc.GetServices();                    // maybe this is blocking
+            Console.WriteLine("After GetServices()");
         }
     }
 }
