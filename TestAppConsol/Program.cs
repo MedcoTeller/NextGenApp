@@ -15,12 +15,12 @@ namespace TestAppConsol
         {
             Console.WriteLine("Hello, World!");
 
-            Browser form = null;
+            EdgeBrowser form = null;
             var t = new Thread(() =>
             {
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
-                form = new Browser();
+                form = new EdgeBrowser();
                 Application.Run(form);
             });
             t.SetApartmentState(ApartmentState.STA);

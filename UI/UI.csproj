@@ -18,6 +18,10 @@
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3595.46" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\GlobalShared\GlobalShared.csproj" />
+  </ItemGroup>
+
     <ItemGroup>
         <Compile Update="Properties\Resources.Designer.cs">
             <DesignTime>True</DesignTime>

@@ -10,6 +10,7 @@
     </PropertyGroup>
 
     <ItemGroup>
+      <ProjectReference Include="..\GlobalShared\GlobalShared.csproj" />
       <ProjectReference Include="..\UI\UI.csproj" />
     </ItemGroup>
 

@@ -1,3 +1,4 @@
+using GlobalShared;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using UI;
@@ -6,6 +7,9 @@ namespace AppStarter
 {
     internal static class Program
     {
+
+        static Utils utils = new Utils("AppStarter");
+
         /// <summary>
         ///  The main entry point for the application.
         /// </summary>
@@ -19,9 +23,8 @@ namespace AppStarter
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Application Exception: {ex.Message}");
+                utils.LogWarning($"Application Exception: {ex.Message}");
             }
-
         }
 
         private static async Task StartCustomerUIBrowser()
@@ -32,13 +35,13 @@ namespace AppStarter
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
             Application.ThreadException += (s, e) =>
             {
-                MessageBox.Show($"Unhandled UI Exception: {e.Exception}");
+                utils.LogWarning($"Unhandled UI Exception: {e.Exception}");
             };
 
-            Browser UIBrowser = null;
+            EdgeBrowser UIBrowser = null;
             var UiThread = new Thread(() =>
             {
-                UIBrowser = new Browser();
+                UIBrowser = new EdgeBrowser();
                 Application.Run(UIBrowser);
                 //UIBrowser.ShowDialog();
             });
