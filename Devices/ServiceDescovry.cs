@@ -84,7 +84,7 @@ namespace Devices
             if (publishers.Count < 1)
             {
                 utils.LogWarning("### No publisher detected ####");
-                throw new NoServicesFoundEx("No publisher was detected.");
+                //throw new NoServicesFoundEx("No publisher was detected.");
             }
         }
 
