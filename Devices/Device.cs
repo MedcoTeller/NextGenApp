@@ -180,6 +180,7 @@ namespace Devices
             DeviceStatus = DeviceStatusEnum.noDevice;
         }
 
+
         protected override bool SetProperty<T>(ref T field, T newValue, [CallerMemberName] string propertyName = "")
         {
             utils.LogInfo($"PropertySacnge: {propertyName} changed from {field} to {newValue}");

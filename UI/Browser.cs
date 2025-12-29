@@ -34,17 +34,44 @@ namespace UI
             //EdgeBrowser.CoreWebView2.Navigate("https://www.google.com");
         }
 
-        public void Start()
+        private void MessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
+        {
+            string msg = e.TryGetWebMessageAsString();
+            utils.LogInfo($"Messagereceived from App: {msg}");
+
+            if (msg.StartsWith("Log"))
+            {
+                HandleAppLog(msg);
+            }
+            else if (msg.StartsWith("Input"))
+            {
+                HandleAppInput(msg);
+            }
+        }
+
+        private void HandleAppInput(string msg)
+        {
+            
+        }
+
+        private void HandleAppLog(string msg)
+        {
+            throw new NotImplementedException();
+        }
+
+        public async Task Start()
         {
             Invoke(new Action(async () =>
             {
                 await EdgeWebView2Browser.EnsureCoreWebView2Async();
                 //EdgeBrowser.CoreWebView2.Navigate("https://www.google.com");
+                EdgeWebView2Browser.CoreWebView2.WebMessageReceived += MessageReceived;
             }
             ));
+            await Task.Delay(300);
         }
 
-        public void Navigate(string url)
+        public async Task Navigate(string url)
         {
             Invoke(new Action(() =>
             {
@@ -57,6 +84,26 @@ namespace UI
             }
             ));
                 //throw new NotImplementedException();
+        }
+
+        public async Task NavigateWithData(string url, object data)
+        {
+            await PreloadObjectAsync(data);
+            await Navigate(url);
+        }
+
+        public async Task EventAsync(string eventName, List<object> parameters)
+        {
+            Invoke(new Action(async () =>
+            {
+                if (EdgeWebView2Browser.CoreWebView2 != null)
+                {
+                    await EdgeWebView2Browser.CoreWebView2.ExecuteScriptAsync($"window.{eventName}('{parameters}');");
+                }
+                else
+                    utils.LogWarning("CoreWebView2 is not initialized yet.");
+            }
+            ));
         }
 
         public async Task<(bool success, string? value)> GetInputAsync(int timeoutMs)
@@ -105,7 +152,7 @@ namespace UI
             return result;
         }
 
-        public void ExecuteScript(string script)
+        public async Task ExecuteScript(string script)
         {
             Invoke(new Action(async () =>
             {
@@ -119,12 +166,12 @@ namespace UI
             ));
         }
 
-        public async Task CallFunctionAsync(string func, List<object> parameters) {
+        public async Task CallFunctionAsync(string funcName, List<object> parameters) {
             Invoke(new Action(async () =>
             {
                 if (EdgeWebView2Browser.CoreWebView2 != null)
                 {
-                    await EdgeWebView2Browser.CoreWebView2.ExecuteScriptAsync($"window.{func}('{parameters}');");
+                    await EdgeWebView2Browser.CoreWebView2.ExecuteScriptAsync($"window.{funcName}('{parameters}');");
                 }
                 else
                     utils.LogWarning("CoreWebView2 is not initialized yet.");
@@ -132,7 +179,7 @@ namespace UI
             ));
         }
 
-        public void SendDataToWebView(object data)
+        public async Task SendDataToWebView(object data)
         {
             Invoke(new Action(async () =>
             {
@@ -140,6 +187,20 @@ namespace UI
                 {
                     var json = JsonSerializer.Serialize(data);
                     EdgeWebView2Browser.CoreWebView2.PostWebMessageAsJson(json);
+                }
+                else
+                    utils.LogWarning("CoreWebView2 is not initialized yet.");
+            }
+            ));
+        }
+
+        public async Task    SendDataToWebView(string data)
+        {
+            Invoke(new Action(async () =>
+            {
+                if (EdgeWebView2Browser.CoreWebView2 != null)
+                {
+                    EdgeWebView2Browser.CoreWebView2.PostWebMessageAsString(data);
                 }
                 else
                     utils.LogWarning("CoreWebView2 is not initialized yet.");
@@ -180,13 +241,6 @@ namespace UI
             ));
         }
 
-        public async Task NavigateWithData(string url, object data)
-        {
-            await PreloadObjectAsync(data);
-            Navigate(url);
-        }
 
     }
-
-
 }
