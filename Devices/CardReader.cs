@@ -220,19 +220,19 @@ namespace Devices
         /// 
         /// </summary>
         /// <param name="track1"></param>
-        /// <param name="trak2"></param>
-        /// <param name="Track3"></param>
+        /// <param name="track2"></param>
+        /// <param name="track3"></param>
         /// <param name="chip"></param>
         /// <param name="timeout"></param>
         /// <returns></returns>
-        public async Task ReadCard(bool track1, bool trak2, bool Track3, bool chip, int timeout = 0)
+        public async Task ReadCard(bool track1, bool track2, bool track3, bool chip, int timeout = 0)
         {
             var cmd = new Command(CardReaderCommands.CardReader_ReadRawData, timeout);
             cmd.Payload = new
             {
                 track1 = track1,
-                track2 = trak2,
-                track3 = Track3,
+                track2 = track2,
+                track3 = track3,
                 chip = chip
             };
             await SendCommand(cmd);

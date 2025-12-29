@@ -18,7 +18,10 @@ namespace AppStarter
         {
             try
             {
-                await StartCustomerUIBrowser();
+                
+                var UI = await StartCustomerUIBrowser();
+                await UI.Start();
+                await UI.Navigate("https://google.com/");
                 //Application.Run();
             }
             catch (Exception ex)
@@ -27,7 +30,7 @@ namespace AppStarter
             }
         }
 
-        private static async Task StartCustomerUIBrowser()
+        private static async Task<EdgeBrowser> StartCustomerUIBrowser()
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
@@ -43,15 +46,15 @@ namespace AppStarter
             {
                 UIBrowser = new EdgeBrowser();
                 Application.Run(UIBrowser);
-                //UIBrowser.ShowDialog();
             });
             UiThread.SetApartmentState(ApartmentState.STA);
             UiThread.Start();
 
-            await Task.Delay(500);// Wait for the form to initialize
-            UIBrowser?.Start();
-            await Task.Delay(500);
-            UIBrowser?.Navigate("https://chatgpt.com/");
+            await Task.Delay(400);// Wait for the form to initialize
+            //UIBrowser?.Start();
+
+            //UIBrowser?.Navigate("https://google.com/");
+            return UIBrowser;
         }
     }
 }
